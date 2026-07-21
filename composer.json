@@ -1,0 +1,25 @@
+{
+    "name": "devletes/filament-sidekick",
+    "description": "A collapsible AI assistant panel for Filament — slides the layout aside instead of floating over it, runs agent turns on the queue, and renders tool activity as it happens.",
+    "keywords": ["filament", "laravel", "ai", "chat", "assistant"],
+    "license": "MIT",
+    "require": {
+        "php": "^8.2",
+        "filament/filament": "^4.0|^5.0",
+        "laravel/ai": "^0.7"
+    },
+    "autoload": {
+        "psr-4": {
+            "Devletes\\Sidekick\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Devletes\\Sidekick\\SidekickServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

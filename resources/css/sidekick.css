@@ -1,0 +1,729 @@
+/* ============================================================
+   Sidekick — collapsible assistant panel
+   Geometry: the aside is a flex sibling of .fi-main-ctn inside
+   .fi-layout, so giving it width natively pushes the page over.
+   Colors/spacing ride the host theme's tokens (Filament palette
+   vars + --spacing/--radius scales) with standalone fallbacks;
+   hosts tune the --sidekick-* variables further.
+   ============================================================ */
+
+/* Livewire's @persist directive wraps the aside in its own div. Erase that
+   box (display: contents) so the aside is the layout's true flex item — the
+   wrapper would otherwise be the card's sticky containing block with zero
+   travel room, and the panel would scroll away with the page. */
+.fi-layout > [x-persist='sidekick-panel'] {
+    display: contents;
+}
+
+/* overflow-x: clip (not hidden) — hidden would make this a scroll container
+   and detach the card's position: sticky from the viewport.
+   contain: size — the viewport-tall card must not inflate the aside's
+   intrinsic height, or every page gains ~the layout padding of dead body
+   scroll; sizes here are explicit, so containment costs nothing. */
+.sidekick-aside {
+    width: 0;
+    flex: none;
+    overflow-x: clip;
+    contain: size;
+    /* Explicit stretch: the aside must span the full layout height so the
+       sticky card can stay pinned for the entire page scroll — even if a
+       theme changes the layout's align-items. */
+    align-self: stretch;
+}
+
+body.sidekick-open .sidekick-aside {
+    width: var(--sidekick-width, 23rem);
+}
+
+body.sidekick-ready .sidekick-aside {
+    transition: width 0.3s ease;
+}
+
+.sidekick-card {
+    --sidekick-muted: var(--gray-500, rgb(107 114 128));
+    --sidekick-text: var(--gray-900, rgb(17 24 39));
+
+    position: sticky;
+    top: var(--sidekick-top, 4rem);
+    height: var(--sidekick-height, calc(100dvh - 4rem));
+    width: var(--sidekick-width, 23rem);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--sidekick-bg, #fff);
+    border-inline-start: 1px solid var(--sidekick-border, color-mix(in srgb, var(--gray-950, #030712) 8%, transparent));
+}
+
+.dark .sidekick-card {
+    --sidekick-bg: var(--gray-900, rgb(17 24 39));
+    --sidekick-border: color-mix(in srgb, var(--gray-50, #f9fafb) 8%, transparent);
+    --sidekick-muted: var(--gray-400, rgb(156 163 175));
+    --sidekick-text: var(--gray-50, #f9fafb);
+}
+
+/* Full-height mode: the panel spans the full viewport height, flush to the
+   edges. Filament v5 renders the topbar inside .fi-main-ctn, so the whole
+   column — topbar included — shrinks naturally when the aside takes width.
+   The aside climbs the layout's own vertical padding on BOTH edges via
+   --sidekick-edge-offset (host-set, defaults to none) — without the bottom
+   climb, the sticky card runs out of containing block on scrolled pages and
+   lifts off the viewport bottom by exactly that padding. */
+body.sidekick-full-height .sidekick-aside {
+    margin-top: calc(-1 * var(--sidekick-edge-offset, 0px));
+    margin-bottom: calc(-1 * var(--sidekick-edge-offset, 0px));
+}
+
+body.sidekick-full-height .sidekick-card {
+    top: 0;
+    height: 100dvh;
+}
+
+/* Desktop keeps the topbar toggle as the only open/close control; the X
+   appears in overlay mode below, where the toggle is covered. */
+.sidekick-close {
+    display: none;
+}
+
+@media (max-width: 1024px) {
+    .sidekick-aside {
+        position: fixed;
+        inset-inline-end: 0;
+        top: 0;
+        height: 100dvh;
+        z-index: 40;
+        margin: 0 !important;
+    }
+
+    body.sidekick-open .sidekick-aside {
+        width: min(calc(100vw - 2rem), 24rem);
+        box-shadow: -8px 0 32px color-mix(in srgb, var(--gray-950, #030712) 18%, transparent);
+    }
+
+    .sidekick-card,
+    body.sidekick-full-height .sidekick-card {
+        position: static;
+        top: auto;
+        height: 100%;
+        width: 100%;
+    }
+
+    .sidekick-close {
+        display: inline-flex;
+    }
+}
+
+/* Phones: the overlay becomes the whole screen. */
+@media (max-width: 640px) {
+    body.sidekick-open .sidekick-aside {
+        width: 100vw;
+    }
+
+    .sidekick-card {
+        border-inline-start: none;
+    }
+}
+
+/* --- Topbar toggle --- */
+
+.sidekick-toggle .sidekick-toggle-icon {
+    width: calc(var(--spacing, 0.25rem) * 5);
+    height: calc(var(--spacing, 0.25rem) * 5);
+}
+
+.sidekick-toggle-open {
+    color: var(--primary-600, #4f46e5);
+}
+
+/* --- Chat layout --- */
+
+.sidekick-chat {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    min-height: 0;
+}
+
+/* --- Header (assistant identity + action strip) --- */
+
+.sidekick-header {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing, 0.25rem) * 2);
+    padding: calc(var(--spacing, 0.25rem) * 2.5) calc(var(--spacing, 0.25rem) * 3.5);
+    /* Constant height whether or not action buttons are present — sized to
+       the tallest child (an sm button) so the header never jumps. */
+    min-height: calc(var(--spacing, 0.25rem) * 14);
+    border-bottom: 1px solid var(--sidekick-border, color-mix(in srgb, var(--gray-950, #030712) 8%, transparent));
+}
+
+.sidekick-header-title {
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--sidekick-text);
+}
+
+.sidekick-header-actions {
+    margin-inline-start: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--spacing, 0.25rem);
+}
+
+.sidekick-log {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: calc(var(--spacing, 0.25rem) * 4);
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing, 0.25rem) * 2.5);
+}
+
+.sidekick-empty {
+    margin: auto;
+    text-align: center;
+    padding: calc(var(--spacing, 0.25rem) * 8) calc(var(--spacing, 0.25rem) * 5);
+}
+
+.sidekick-empty-avatar {
+    width: calc(var(--spacing, 0.25rem) * 12);
+    height: calc(var(--spacing, 0.25rem) * 12);
+    margin: 0 auto calc(var(--spacing, 0.25rem) * 3);
+    border-radius: 9999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--primary-600, #4f46e5) 12%, transparent);
+    color: var(--primary-600, #4f46e5);
+}
+
+.sidekick-empty-avatar svg {
+    width: calc(var(--spacing, 0.25rem) * 6);
+    height: calc(var(--spacing, 0.25rem) * 6);
+}
+
+.sidekick-empty-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--sidekick-text);
+}
+
+.sidekick-empty-text {
+    margin-top: calc(var(--spacing, 0.25rem) * 1.5);
+    font-size: 0.8125rem;
+    color: var(--sidekick-muted);
+}
+
+.sidekick-resume-link {
+    margin-top: calc(var(--spacing, 0.25rem) * 3.5);
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing, 0.25rem) * 1.5);
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--primary-600, #4f46e5);
+}
+
+.sidekick-resume-link:hover {
+    text-decoration: underline;
+}
+
+.sidekick-resume-link:disabled {
+    opacity: 0.7;
+}
+
+.sidekick-resume-link .fi-loading-indicator {
+    width: calc(var(--spacing, 0.25rem) * 4);
+    height: calc(var(--spacing, 0.25rem) * 4);
+}
+
+/* --- Bubbles --- */
+
+.sidekick-bubble {
+    max-width: 88%;
+    border-radius: var(--radius-xl, 0.75rem);
+    padding: calc(var(--spacing, 0.25rem) * 2) calc(var(--spacing, 0.25rem) * 3);
+    font-size: 0.875rem;
+    line-height: 1.55;
+    word-break: break-word;
+}
+
+/* Both roles stay neutral grays (primary is reserved for actions/links);
+   the user side is the stronger shade. Hosts retint via the two vars. */
+.sidekick-bubble-user {
+    align-self: flex-end;
+    background: var(--sidekick-bubble-user-bg, color-mix(in srgb, var(--gray-950, #030712) 8%, transparent));
+    white-space: pre-wrap;
+}
+
+.sidekick-bubble-assistant {
+    align-self: flex-start;
+    background: var(--sidekick-bubble-assistant-bg, color-mix(in srgb, var(--gray-950, #030712) 4%, transparent));
+}
+
+.dark .sidekick-bubble-user {
+    background: var(--sidekick-bubble-user-bg, color-mix(in srgb, var(--gray-50, #f9fafb) 10%, transparent));
+}
+
+.dark .sidekick-bubble-assistant {
+    background: var(--sidekick-bubble-assistant-bg, color-mix(in srgb, var(--gray-50, #f9fafb) 5%, transparent));
+}
+
+/* Streaming reveal: plain text owned by the typewriter, with a blinking caret. */
+.sidekick-stream-text {
+    white-space: pre-wrap;
+}
+
+.sidekick-stream-text::after {
+    content: '▍';
+    margin-inline-start: var(--spacing, 0.25rem);
+    color: var(--primary-600, #4f46e5);
+    animation: sidekick-blink 1s step-end infinite;
+}
+
+@keyframes sidekick-blink {
+    50% {
+        opacity: 0;
+    }
+}
+
+.sidekick-prose p + p {
+    margin-top: calc(var(--spacing, 0.25rem) * 2);
+}
+
+.sidekick-prose ul,
+.sidekick-prose ol {
+    margin: calc(var(--spacing, 0.25rem) * 1.5) 0 calc(var(--spacing, 0.25rem) * 1.5) calc(var(--spacing, 0.25rem) * 4.5);
+    list-style: disc;
+}
+
+.sidekick-prose ol {
+    list-style: decimal;
+}
+
+.sidekick-prose li + li {
+    margin-top: calc(var(--spacing, 0.25rem) * 0.5);
+}
+
+.sidekick-prose code {
+    font-size: 0.8125rem;
+    background: color-mix(in srgb, var(--gray-950, #030712) 6%, transparent);
+    border-radius: var(--radius-sm, 0.25rem);
+    padding: calc(var(--spacing, 0.25rem) * 0.25) var(--spacing, 0.25rem);
+}
+
+.dark .sidekick-prose code {
+    background: color-mix(in srgb, var(--gray-50, #f9fafb) 10%, transparent);
+}
+
+.sidekick-prose pre {
+    background: color-mix(in srgb, var(--gray-950, #030712) 6%, transparent);
+    border-radius: var(--radius-lg, 0.5rem);
+    padding: calc(var(--spacing, 0.25rem) * 2) calc(var(--spacing, 0.25rem) * 2.5);
+    overflow-x: auto;
+    margin: calc(var(--spacing, 0.25rem) * 1.5) 0;
+}
+
+.dark .sidekick-prose pre {
+    background: color-mix(in srgb, var(--gray-50, #f9fafb) 8%, transparent);
+}
+
+.sidekick-prose pre code {
+    background: none;
+    padding: 0;
+}
+
+.sidekick-prose a {
+    color: var(--primary-600, #4f46e5);
+    text-decoration: underline;
+}
+
+/* --- Action buttons (PresentActions tool) --- */
+
+.sidekick-msg-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing, 0.25rem) * 1.5);
+    padding-top: calc(var(--spacing, 0.25rem) * 0.5);
+}
+
+.sidekick-action-btn {
+    font-size: 0.8125rem;
+    font-weight: 500;
+    padding: calc(var(--spacing, 0.25rem) * 1.25) calc(var(--spacing, 0.25rem) * 2.75);
+    border: 1px solid var(--primary-600, #4f46e5);
+    border-radius: var(--radius-lg, 0.5rem);
+    color: var(--primary-600, #4f46e5);
+}
+
+.sidekick-action-btn:hover {
+    background: color-mix(in srgb, var(--primary-600, #4f46e5) 10%, transparent);
+}
+
+/* --- Pending-action confirm cards --- */
+
+/* The dock replaces the composer while a card awaits an answer. */
+.sidekick-action-dock {
+    padding: calc(var(--spacing, 0.25rem) * 3);
+    border-top: 1px solid var(--sidekick-border, color-mix(in srgb, var(--gray-950, #030712) 8%, transparent));
+}
+
+.sidekick-action-card {
+    align-self: stretch;
+    border: 1px solid var(--primary-600, #4f46e5);
+    border-radius: var(--radius-xl, 0.75rem);
+    padding: calc(var(--spacing, 0.25rem) * 3) calc(var(--spacing, 0.25rem) * 3.5);
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing, 0.25rem) * 2);
+}
+
+.sidekick-action-card-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+}
+
+.sidekick-action-card-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing, 0.25rem);
+    font-size: 0.8125rem;
+}
+
+.sidekick-action-card-rows > div {
+    display: flex;
+    justify-content: space-between;
+    gap: calc(var(--spacing, 0.25rem) * 3);
+}
+
+.sidekick-action-card-rows dt {
+    color: var(--sidekick-muted);
+}
+
+.sidekick-action-card-rows dd {
+    text-align: end;
+    font-weight: 500;
+}
+
+/* Buttons are standard Filament <x-filament::button> components — the theme
+   (colors, radius, focus states) comes from the host panel; we only split
+   the row 50/50. */
+.sidekick-action-card-buttons {
+    display: flex;
+    gap: calc(var(--spacing, 0.25rem) * 2);
+    padding-top: var(--spacing, 0.25rem);
+}
+
+.sidekick-action-card-buttons .fi-btn {
+    flex: 1;
+    justify-content: center;
+}
+
+.sidekick-action-card-note {
+    font-size: 0.6875rem;
+    color: var(--sidekick-muted);
+    text-align: center;
+}
+
+.sidekick-action-outcome {
+    font-size: 0.8125rem;
+    color: var(--sidekick-muted);
+    border-inline-start: 2px solid var(--sidekick-border, color-mix(in srgb, var(--gray-950, #030712) 12%, transparent));
+    border-radius: 0;
+    padding-inline-start: calc(var(--spacing, 0.25rem) * 2.5);
+}
+
+.sidekick-action-outcome-executed {
+    border-inline-start-color: var(--success-500, rgb(34 197 94));
+}
+
+.sidekick-action-outcome-failed {
+    border-inline-start-color: var(--danger-600, rgb(220 38 38));
+}
+
+/* --- Tool activity + thinking --- */
+
+.sidekick-activity {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing, 0.25rem) * 1.5);
+    font-size: 0.75rem;
+    color: var(--sidekick-muted);
+    padding-inline-start: calc(var(--spacing, 0.25rem) * 0.5);
+}
+
+.sidekick-activity-icon {
+    width: calc(var(--spacing, 0.25rem) * 3.5);
+    height: calc(var(--spacing, 0.25rem) * 3.5);
+    color: var(--success-500, rgb(34 197 94));
+}
+
+.sidekick-spinner {
+    width: calc(var(--spacing, 0.25rem) * 3.5);
+    height: calc(var(--spacing, 0.25rem) * 3.5);
+    flex: none;
+    border-radius: 9999px;
+    border: 2px solid color-mix(in srgb, var(--gray-500, rgb(107 114 128)) 30%, transparent);
+    border-top-color: var(--primary-600, #4f46e5);
+    animation: sidekick-spin 0.8s linear infinite;
+}
+
+@keyframes sidekick-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.sidekick-thinking {
+    display: flex;
+    gap: var(--spacing, 0.25rem);
+    padding: calc(var(--spacing, 0.25rem) * 1.5) calc(var(--spacing, 0.25rem) * 0.5);
+}
+
+.sidekick-thinking span {
+    width: calc(var(--spacing, 0.25rem) * 1.5);
+    height: calc(var(--spacing, 0.25rem) * 1.5);
+    border-radius: 9999px;
+    background: var(--gray-400, rgb(156 163 175));
+    animation: sidekick-pulse 1.2s ease-in-out infinite;
+}
+
+.sidekick-thinking span:nth-child(2) {
+    animation-delay: 0.15s;
+}
+
+.sidekick-thinking span:nth-child(3) {
+    animation-delay: 0.3s;
+}
+
+@keyframes sidekick-pulse {
+    0%,
+    100% {
+        opacity: 0.35;
+        transform: translateY(0);
+    }
+    50% {
+        opacity: 1;
+        transform: translateY(-2px);
+    }
+}
+
+/* --- Error --- */
+
+.sidekick-error {
+    align-self: stretch;
+    border: 1px solid color-mix(in srgb, var(--danger-600, rgb(220 38 38)) 25%, transparent);
+    background: color-mix(in srgb, var(--danger-600, rgb(220 38 38)) 6%, transparent);
+    border-radius: var(--radius-lg, 0.625rem);
+    padding: calc(var(--spacing, 0.25rem) * 2.5) calc(var(--spacing, 0.25rem) * 3);
+    font-size: 0.8125rem;
+    color: var(--danger-800, rgb(153 27 27));
+}
+
+.dark .sidekick-error {
+    color: var(--danger-300, rgb(252 165 165));
+}
+
+.sidekick-error button {
+    margin-top: calc(var(--spacing, 0.25rem) * 1.5);
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+/* --- Composer --- */
+
+.sidekick-composer {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing, 0.25rem) * 2);
+    padding: calc(var(--spacing, 0.25rem) * 3);
+    border-top: 1px solid var(--sidekick-border, color-mix(in srgb, var(--gray-950, #030712) 8%, transparent));
+}
+
+.sidekick-composer-row {
+    display: flex;
+    align-items: flex-end;
+    gap: calc(var(--spacing, 0.25rem) * 2);
+}
+
+/* Field + send are standard Filament components (input.wrapper, button);
+   only layout and textarea behavior live here. */
+.sidekick-composer-field {
+    flex: 1;
+    min-width: 0;
+}
+
+.sidekick-composer textarea {
+    width: 100%;
+    resize: none;
+    /* At rest, exactly as tall as the button column beside it — with stock
+       Filament buttons: 2 × 9 spacing + 1.5 spacing gap = 19.5. Hosts whose
+       theme sizes buttons differently set the var to their own stack. */
+    min-height: var(--sidekick-composer-field-min, calc(var(--spacing, 0.25rem) * 19.5));
+    max-height: 120px;
+}
+
+/* --- Attachments --- */
+
+/* Icon-only column: attach stacked over send. Both are stock fi-btn
+   buttons (the attach one is the component rendered as a <label> for the
+   hidden file input) — chrome, colors, hover, and loading indicators all
+   come from Filament. The only local tweak: pin the side padding so the
+   icon-only buttons sit square/round instead of oval. */
+.sidekick-composer-buttons {
+    flex: none;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing, 0.25rem) * 1.5);
+}
+
+.sidekick-composer-buttons .fi-btn {
+    /* !important on purpose: themes restyle .fi-btn with high-specificity
+       selectors (e.g. Orbit's .fi-btn:not(.fi-size-xs):not(...) at (0,5,0),
+       setting min-height 11 / padding-inline 5) that out-rank any sane
+       selector here. Hosts tune the VALUES via the vars instead of fighting
+       the rules. The defaults make a 2.25rem circle/square: min-height 9 =
+       icon (5) + block padding (2×2), and side padding 2 matches. */
+    padding-inline: var(--sidekick-composer-btn-px, calc(var(--spacing, 0.25rem) * 2)) !important;
+    min-height: var(--sidekick-composer-btn-min, calc(var(--spacing, 0.25rem) * 9)) !important;
+    cursor: pointer;
+}
+
+/* The label can't carry :disabled itself — mirror the hidden input's state. */
+.sidekick-composer-buttons:has(input[type='file']:disabled) .sidekick-attach-btn {
+    opacity: 0.5;
+    pointer-events: none;
+}
+
+.sidekick-composer-buttons:has(input[type='file']:focus-visible) .sidekick-attach-btn {
+    outline: 2px solid var(--primary-600, #4f46e5);
+    outline-offset: 1px;
+}
+
+.sidekick-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing, 0.25rem) * 1.5);
+}
+
+/* Chips echoing a sent message sit under the user bubble, right-aligned. */
+.sidekick-chips-user {
+    align-self: flex-end;
+    justify-content: flex-end;
+    max-width: 88%;
+}
+
+.sidekick-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing, 0.25rem) * 1.25);
+    max-width: 100%;
+    padding: var(--spacing, 0.25rem) calc(var(--spacing, 0.25rem) * 2);
+    border: 1px solid var(--sidekick-border, color-mix(in srgb, var(--gray-950, #030712) 10%, transparent));
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    color: var(--sidekick-text);
+    background: color-mix(in srgb, var(--gray-950, #030712) 3%, transparent);
+}
+
+.dark .sidekick-chip {
+    background: color-mix(in srgb, var(--gray-50, #f9fafb) 5%, transparent);
+}
+
+.sidekick-chip-icon {
+    width: calc(var(--spacing, 0.25rem) * 3.5);
+    height: calc(var(--spacing, 0.25rem) * 3.5);
+    flex: none;
+    color: var(--sidekick-muted);
+}
+
+.sidekick-chip-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: calc(var(--spacing, 0.25rem) * 36);
+    font-weight: 500;
+}
+
+.sidekick-chip-size {
+    flex: none;
+    color: var(--sidekick-muted);
+}
+
+.sidekick-chip-remove {
+    display: inline-flex;
+    flex: none;
+    width: calc(var(--spacing, 0.25rem) * 4);
+    height: calc(var(--spacing, 0.25rem) * 4);
+    align-items: center;
+    justify-content: center;
+    color: var(--sidekick-muted);
+}
+
+.sidekick-chip-remove:hover {
+    color: var(--danger-600, rgb(220 38 38));
+}
+
+.sidekick-chip-remove svg {
+    width: calc(var(--spacing, 0.25rem) * 3);
+    height: calc(var(--spacing, 0.25rem) * 3);
+}
+
+.sidekick-upload-error {
+    font-size: 0.75rem;
+    color: var(--danger-600, rgb(220 38 38));
+}
+
+/* Attachments block on a confirm card: label, unified chips, upload field. */
+.sidekick-card-upload {
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--spacing, 0.25rem) * 1.5);
+}
+
+.sidekick-card-upload-label {
+    font-size: 0.8125rem;
+    color: var(--sidekick-muted);
+}
+
+.sidekick-upload-field {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing, 0.25rem) * 2);
+    padding: calc(var(--spacing, 0.25rem) * 2) calc(var(--spacing, 0.25rem) * 2.5);
+    border: 1px dashed color-mix(in srgb, var(--gray-500, rgb(107 114 128)) 45%, transparent);
+    border-radius: var(--radius-lg, 0.5rem);
+    font-size: 0.8125rem;
+    color: var(--sidekick-muted);
+    cursor: pointer;
+}
+
+/* The input stretches invisibly across the field: clicks open the browser
+   dialog and files dropped anywhere on the field upload natively. */
+.sidekick-upload-field input[type='file'] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: pointer;
+}
+
+
+.sidekick-upload-field:hover,
+.sidekick-upload-field:focus-within {
+    border-color: var(--primary-600, #4f46e5);
+    color: var(--primary-600, #4f46e5);
+}
+
+.sidekick-upload-required {
+    color: var(--danger-600, rgb(220 38 38));
+}
+
+.sidekick-upload-spinner {
+    width: calc(var(--spacing, 0.25rem) * 4);
+    height: calc(var(--spacing, 0.25rem) * 4);
+    margin-inline-start: auto;
+}
+
