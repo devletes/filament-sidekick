@@ -1,6 +1,134 @@
 # Filament Sidekick
 
-A collapsible AI assistant panel for Filament. The panel slides in from the right and **pushes the layout aside** (a real flex sibling of the page content — no overlay), runs each chat turn as a queued job backed by [laravel/ai](https://github.com/laravel/ai), and updates the UI via broadcasting (Reverb/Pusher) with polling as the always-on fallback.
+A collapsible AI assistant panel for Filament — and a small framework for teaching it your app. The panel slides in from the right and **pushes the layout aside** (a real flex sibling of the page content — no overlay), runs each chat turn as a queued job backed by [laravel/ai](https://github.com/laravel/ai), and updates the UI via broadcasting (Reverb/Pusher) with polling as the always-on fallback.
+
+## Quick start
+
+```bash
+composer require devletes/filament-sidekick
+php artisan sidekick:install
+```
+
+Register the plugin on your panel:
+
+```php
+use Devletes\Sidekick\SidekickPlugin;
+
+$panel->plugins([
+    SidekickPlugin::make(),
+]);
+```
+
+Point laravel/ai at a provider (e.g. `ANTHROPIC_API_KEY` in `.env`), run a queue worker, and the assistant is live. Then teach it your app:
+
+```bash
+php artisan sidekick:tool SearchProjects     # a read tool
+php artisan sidekick:action CreateTask       # a confirmable write action
+```
+
+Generated classes land in `app/Sidekick/Tools` and `app/Sidekick/Actions`, which are **auto-discovered — no registration step**. Fill in `description()`, `schema()`, and the body, and the model can use them on the next message.
+
+## Creating tools (reads)
+
+A tool is one class: tell the model what it does, declare its arguments, do the work. Extend `Support\ChatToolBase`:
+
+```php
+class SearchProjects extends ChatToolBase
+{
+    public function description(): string
+    {
+        return 'Search the user\'s projects by name.';
+    }
+
+    public function schema(JsonSchema $schema): array
+    {
+        return ['query' => $schema->string()->required()];
+    }
+
+    public function label(): string
+    {
+        return 'Searching your projects';
+    }
+
+    public function handle(Request $request): string
+    {
+        return $this->respond(
+            Project::query()
+                ->whereBelongsTo($this->user)          // always scope to the chatting user
+                ->where('name', 'like', '%'.$request['query'].'%')
+                ->limit(5)
+                ->get(['id', 'name']),
+        );
+    }
+}
+```
+
+Optional overrides: `authorize($user)` (unauthorized users are never offered the tool) and `label()` (the status line in the panel; defaults to the class name).
+
+## Creating actions (writes)
+
+Writes never run from the model. An action is also one class — extend `Support\SidekickAction` — and Sidekick automatically offers it to the model as a `Propose{ClassName}` tool. The model can only **propose**: `prepare()` validates the payload into a confirmation card in the panel, and `execute()` runs exclusively when the user clicks Confirm, under their real session, re-validating against live data.
+
+```php
+class CreateTask extends SidekickAction
+{
+    public function description(): string
+    {
+        return 'Create a task in a project the user owns.';
+    }
+
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'project_id' => $schema->integer()->required(),
+            'title' => $schema->string()->required(),
+        ];
+    }
+
+    public function prepare(array $payload, Authenticatable $user): array
+    {
+        $project = Project::query()->whereBelongsTo($user)->find($payload['project_id'] ?? null)
+            ?? throw new InvalidArgumentException('That project does not exist.');
+
+        return [
+            'payload' => ['project_id' => $project->id, 'title' => trim($payload['title'])],
+            'summary' => "Create \"{$payload['title']}\" in {$project->name}",
+            'preview' => [
+                ['label' => 'Project', 'value' => $project->name],
+                ['label' => 'Title', 'value' => $payload['title']],
+            ],
+        ];
+    }
+
+    public function execute(array $payload, Authenticatable $user): string
+    {
+        Project::query()->whereBelongsTo($user)->findOrFail($payload['project_id'])
+            ->tasks()->create(['title' => $payload['title']]);
+
+        return 'Task created.';
+    }
+}
+```
+
+Conventions you can override: `type()` (defaults to the snake_cased class name), `authorize($user)`, `label()`. Throw `InvalidArgumentException` with user-readable messages anywhere — on propose it goes back to the model to self-correct; on execute it lands on the card.
+
+## Registering tools & actions
+
+Three ways, all composable — everything is deduplicated:
+
+1. **Discovery (default)**: any non-abstract class in `app/Sidekick/Tools` / `app/Sidekick/Actions` implementing the right contract. Paths and kill switch under `sidekick.discover`.
+2. **Config**: class-name arrays in `sidekick.tools` / `sidekick.actions` — also how a profile gets its own tool set, since profiles override config keys.
+3. **Runtime**: `Sidekick::tools([...])` / `Sidekick::actions([...])` (the `Devletes\Sidekick\Facades\Sidekick` facade) from any service provider — how other packages contribute tools, and the registration that works identically in web requests and queue workers.
+
+## Built-in tools
+
+`Navigate` (redirect the user when the reply finishes) and `PresentActions` (clickable buttons under a reply) ship with the package and wake automatically once you bind an `ActionResolver` — the seam that turns named targets into authorized URLs:
+
+```php
+$this->app->singleton(\Devletes\Sidekick\Contracts\ActionResolver::class, AppActionResolver::class);
+```
+
+Per-tool opt-out under `sidekick.builtin_tools`.
 
 ## How it fits together
 
@@ -14,8 +142,7 @@ A collapsible AI assistant panel for Filament. The panel slides in from the righ
 - **Config** (`config/sidekick.php`): agent class, assistant identity, instructions, model, queue, broadcasting, panel geometry.
 - **`SidekickContext` binding**: stamp extra columns onto conversations (e.g. `tenant_id`) and scope conversation queries per context.
 - **`sidekick.jobs.run`**: subclass `RunChatTurn` to add app concerns (tenant context, usage metering).
-- **Tools**: implement `Contracts\ChatTool` (extends laravel/ai's `Tool` with `authorize()`, `label()`, `needsConfirmation()`) and list the classes in `sidekick.tools`.
-- **Actions**: implement `Contracts\ActionHandler` (`prepare()` proposes a card, `execute()` runs on the user's Confirm click) and list the classes in `sidekick.actions`.
+- **Tools & actions**: see the authoring sections above. The underlying contracts are `Contracts\ChatTool` (laravel/ai's `Tool` plus `authorize()` + `label()`) and `Contracts\ActionHandler` / `Contracts\ProposableAction`; the base classes exist so you rarely touch them directly.
 - **CSS variables**: `--sidekick-width`, `--sidekick-top`, `--sidekick-height`, `--sidekick-edge-offset` (how far the aside climbs the layout's vertical padding on both edges in full-height mode) — plus `panel.full_height` to run the panel flush edge-to-edge (top 0 → 100dvh) instead of below the topbar line. Composer geometry: `--sidekick-composer-btn-px` / `--sidekick-composer-btn-min` (side padding + height of the icon-only attach/send buttons; the defaults pin a 2.25rem circle even against high-specificity theme button rules) and `--sidekick-composer-field-min` (the textarea's resting height — set it to your two-button stack).
 - **Body-class hooks**: panel state is mirrored onto `<body>` as `sidekick-open`, `sidekick-full-height`, and `sidekick-ready` — use them to move host chrome (floating buttons, toasts) out of the panel's way, e.g. `body.sidekick-open .my-fab { right: calc(var(--sidekick-width) + 1rem); }`.
 
@@ -44,14 +171,6 @@ $panel->plugins([
 
 Panels without a profile run the base config. Conversations are stamped with their profile, so each panel's assistant keeps its own history, and the queued turn re-applies the profile from the conversation — a chat always runs under the assistant it started with, whichever worker picks it up.
 
-## Registering
-
-```php
-use Devletes\Sidekick\SidekickPlugin;
-
-$panel->plugins([
-    SidekickPlugin::make(),
-]);
-```
+## Under the hood
 
 The service provider auto-loads migrations (conversations, messages, runs) and registers a private broadcast channel `sidekick.user.{id}` (owner-only). Run updates broadcast per **user**, not per conversation — the panel mounts on a fresh conversation, so the user id is the only stable subscription key. The subscription itself lives in `sidekick.js` (waits for `window.Echo` / Filament's `EchoLoaded` event, then forwards each event as a `sidekick-echo-nudge` Livewire dispatch) because Livewire's native `echo-` listeners silently no-op when Echo loads late. While broadcasting is enabled the poll interval relaxes to `polling.while_broadcasting` (default `10s`); echo nudges carry the stream and polling stays on as the safety net.

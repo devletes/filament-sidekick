@@ -1,0 +1,63 @@
+<?php
+
+namespace {{ namespace }};
+
+use Devletes\Sidekick\Support\ChatToolBase;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use Laravel\Ai\Tools\Request;
+
+class {{ class }} extends ChatToolBase
+{
+    /** Tells the model what this tool does and when to call it. */
+    public function description(): string
+    {
+        return 'Describe what this tool looks up.';
+    }
+
+    /**
+     * The arguments the model must supply.
+     *
+     * @return array<string, \Illuminate\JsonSchema\Types\Type>
+     */
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'query' => $schema->string()
+                ->description('What to look up.')
+                ->required(),
+        ];
+    }
+
+    /** Status line shown in the panel while the tool runs. */
+    public function label(): string
+    {
+        return 'Looking that up';
+    }
+
+    // Restrict who is offered this tool (unauthorized users never see it):
+    //
+    // public function authorize(\Illuminate\Contracts\Auth\Authenticatable $user): bool
+    // {
+    //     return $user->can('viewAny', Thing::class);
+    // }
+
+    /**
+     * Read-only work happens here; $this->user is the chatting user — scope
+     * every query to them. Return compact data for the model (respond()
+     * JSON-encodes it). For write operations make a SidekickAction instead:
+     * php artisan sidekick:action
+     */
+    public function handle(Request $request): string
+    {
+        // $results = Thing::query()
+        //     ->whereBelongsTo($this->user)
+        //     ->where('name', 'like', '%'.$request['query'].'%')
+        //     ->limit(5)
+        //     ->get(['id', 'name']);
+
+        return $this->respond([
+            'query' => $request['query'],
+            'results' => [],
+        ]);
+    }
+}

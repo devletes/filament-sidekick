@@ -16,6 +16,7 @@ class SidekickServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/sidekick.php', 'sidekick');
 
+        $this->app->singleton(\Devletes\Sidekick\Support\SidekickManager::class);
         $this->app->singletonIf(SidekickContext::class, DefaultSidekickContext::class);
         $this->app->singletonIf(
             \Devletes\Sidekick\Contracts\ActionResolver::class,
@@ -50,6 +51,9 @@ class SidekickServiceProvider extends ServiceProvider
 
         if ($this->app->runningInConsole()) {
             $this->commands([
+                \Devletes\Sidekick\Console\InstallCommand::class,
+                \Devletes\Sidekick\Console\MakeToolCommand::class,
+                \Devletes\Sidekick\Console\MakeActionCommand::class,
                 \Devletes\Sidekick\Console\PruneAttachments::class,
             ]);
         }

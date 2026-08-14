@@ -8,6 +8,8 @@ use Laravel\Ai\Tools\ToolNameResolver;
 
 class ToolRegistry
 {
+    public function __construct(protected SidekickManager $manager) {}
+
     /** @return ChatTool[] */
     public function authorizedFor(?Authenticatable $user): array
     {
@@ -15,10 +17,8 @@ class ToolRegistry
             return [];
         }
 
-        return collect(config('sidekick.tools', []))
-            ->map(function (string $class) use ($user): ChatTool {
-                $tool = app($class);
-
+        return collect($this->manager->toolInstances())
+            ->map(function (ChatTool $tool) use ($user): ChatTool {
                 if ($tool instanceof ChatToolBase) {
                     $tool->forUser($user);
                 }
@@ -33,9 +33,7 @@ class ToolRegistry
     /** Status line for a tool by its model-facing name (as recorded in run activity). */
     public function labelFor(string $toolName): ?string
     {
-        foreach (config('sidekick.tools', []) as $class) {
-            $tool = app($class);
-
+        foreach ($this->manager->toolInstances() as $tool) {
             if (ToolNameResolver::resolve($tool) === $toolName) {
                 return $tool->label();
             }

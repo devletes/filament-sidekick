@@ -34,11 +34,32 @@ return [
 
     'max_prompt_length' => 4000,
 
-    // Chat tools (class names implementing Contracts\ChatTool).
+    // Chat tools (class names implementing Contracts\ChatTool). Usually
+    // unnecessary: classes in app/Sidekick/Tools are discovered automatically,
+    // and packages can register via the Sidekick facade. List classes here to
+    // add ones living elsewhere — or to give a profile its own tool set.
     'tools' => [],
 
-    // Confirmable write actions (class names implementing Contracts\ActionHandler).
+    // Confirmable write actions (class names implementing
+    // Contracts\ActionHandler — extend Support\SidekickAction). Same deal:
+    // app/Sidekick/Actions is discovered automatically.
     'actions' => [],
+
+    // Zero-registration discovery. Every non-abstract class in these
+    // directories implementing the right contract joins the assistant.
+    // null paths → app/Sidekick/Tools and app/Sidekick/Actions.
+    'discover' => [
+        'enabled' => true,
+        'tools' => null,
+        'actions' => null,
+    ],
+
+    // Built-in tools. Navigate + PresentActions wake automatically once an
+    // ActionResolver with targets is bound; set false to keep one off anyway.
+    'builtin_tools' => [
+        'navigate' => true,
+        'present_actions' => true,
+    ],
 
     // Minutes before an unconfirmed action card expires.
     'actions_expire_after' => 15,

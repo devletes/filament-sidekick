@@ -4,6 +4,7 @@ namespace Devletes\Sidekick\Support;
 
 use Devletes\Sidekick\Contracts\ChatTool;
 use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Support\Str;
 
 abstract class ChatToolBase implements ChatTool
 {
@@ -22,9 +23,10 @@ abstract class ChatToolBase implements ChatTool
         return true;
     }
 
-    public function needsConfirmation(): bool
+    /** Override with something specific; the default derives from the class name. */
+    public function label(): string
     {
-        return false;
+        return 'Using: '.Str::headline(class_basename(static::class));
     }
 
     /** Compact JSON reads best for the model. */

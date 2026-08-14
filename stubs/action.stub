@@ -1,0 +1,78 @@
+<?php
+
+namespace {{ namespace }};
+
+use Devletes\Sidekick\Support\SidekickAction;
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Contracts\JsonSchema\JsonSchema;
+use InvalidArgumentException;
+
+/**
+ * A confirmable write action. Sidekick automatically offers it to the model
+ * as a "Propose{{ class }}" tool; the model can only PROPOSE — execute() runs
+ * exclusively from the user's Confirm click on the card in the panel.
+ */
+class {{ class }} extends SidekickAction
+{
+    /** Tells the model what this action changes and when to propose it. */
+    public function description(): string
+    {
+        return 'Describe what this action does.';
+    }
+
+    /**
+     * The payload the model must supply when proposing.
+     *
+     * @return array<string, \Illuminate\JsonSchema\Types\Type>
+     */
+    public function schema(JsonSchema $schema): array
+    {
+        return [
+            'name' => $schema->string()
+                ->description('...')
+                ->required(),
+        ];
+    }
+
+    /**
+     * Validate + normalize the payload and describe the confirm card. Throw
+     * InvalidArgumentException with a user-readable message for anything
+     * invalid — the model receives it and can correct itself.
+     */
+    public function prepare(array $payload, Authenticatable $user): array
+    {
+        $name = trim((string) ($payload['name'] ?? ''));
+
+        if ($name === '') {
+            throw new InvalidArgumentException('A name is required.');
+        }
+
+        return [
+            'payload' => ['name' => $name],
+            'summary' => "Create \"{$name}\"",
+            'preview' => [
+                ['label' => 'Name', 'value' => $name],
+            ],
+            // Ask for a file on the confirm card (ids arrive in
+            // $payload['attachment_ids'] at execute time):
+            // 'upload' => ['required' => false, 'label' => 'Attachment', 'multiple' => false],
+        ];
+    }
+
+    /**
+     * Runs on the user's Confirm click, under their real session — always
+     * re-validate against live data. Returns a short outcome line for the
+     * card, e.g. "Created."
+     */
+    public function execute(array $payload, Authenticatable $user): string
+    {
+        // Thing::create(['name' => $payload['name'], ...]);
+
+        return 'Done.';
+    }
+
+    // Conventions you can override:
+    // - type():      defaults to the snake_cased class name
+    // - label():     status line while the proposal is prepared
+    // - authorize(): who may propose this action (default: everyone)
+}
