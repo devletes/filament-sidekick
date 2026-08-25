@@ -2,12 +2,14 @@
 
 namespace Devletes\Sidekick\Agents;
 
+use Devletes\Sidekick\Models\PendingAction;
 use Devletes\Sidekick\Support\ToolRegistry;
 use Laravel\Ai\Concerns\RemembersConversations;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
 use Laravel\Ai\Contracts\HasProviderOptions;
 use Laravel\Ai\Contracts\HasTools;
+use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
 
 class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
@@ -27,8 +29,12 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
             .' Today is '.now()->toFormattedDateString().'.';
 
         $extra = config('sidekick.instructions');
+        $prompt = $extra ? $base."\n\n".$extra : $base;
 
-        return ($extra ? $base."\n\n".$extra : $base).$this->recentActionOutcomes();
+        // Standing guidance the offered tools ship with (ChatTool::instructions()).
+        $guidance = app(ToolRegistry::class)->instructionsFor($user);
+
+        return ($guidance === '' ? $prompt : $prompt."\n\n".$guidance).$this->recentActionOutcomes();
     }
 
     /** System-verified outcomes of confirmable actions, so the model knows what actually happened. */
@@ -38,14 +44,14 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
             return '';
         }
 
-        $outcomes = \Devletes\Sidekick\Models\PendingAction::query()
+        $outcomes = PendingAction::query()
             ->where('conversation_id', $this->currentConversation())
             ->where('updated_at', '>=', now()->subHours(2))
             ->whereIn('status', [
-                \Devletes\Sidekick\Models\PendingAction::STATUS_EXECUTED,
-                \Devletes\Sidekick\Models\PendingAction::STATUS_CANCELLED,
-                \Devletes\Sidekick\Models\PendingAction::STATUS_FAILED,
-                \Devletes\Sidekick\Models\PendingAction::STATUS_EXPIRED,
+                PendingAction::STATUS_EXECUTED,
+                PendingAction::STATUS_CANCELLED,
+                PendingAction::STATUS_FAILED,
+                PendingAction::STATUS_EXPIRED,
             ])
             ->latest('updated_at')
             ->limit(5)
@@ -64,7 +70,7 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
         return app(ToolRegistry::class)->authorizedFor($this->conversationParticipant());
     }
 
-    public function providerOptions(\Laravel\Ai\Enums\Lab|string $provider): array
+    public function providerOptions(Lab|string $provider): array
     {
         return ['max_tokens' => (int) config('sidekick.max_output_tokens', 2048)];
     }
@@ -73,9 +79,7 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
     {
         $limit = config('sidekick.history_limit', 10);
 
-        // null → the whole conversation enters context. laravel/ai types the
-        // limit as int all the way down, so "no cap" travels as PHP_INT_MAX
-        // (a valid LIMIT for MySQL and SQLite alike).
+        // null means no cap; laravel/ai types the limit as int, so it travels as PHP_INT_MAX (a valid LIMIT everywhere).
         return $limit === null ? PHP_INT_MAX : max(1, (int) $limit);
     }
 }

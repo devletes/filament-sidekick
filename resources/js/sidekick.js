@@ -1,7 +1,4 @@
-// Reverb/Pusher bridge: nudge the panel to re-render when a run row changes.
-// Subscribed from JS rather than Livewire's native `echo-` listeners — those
-// silently no-op when window.Echo isn't there yet, and Filament creates Echo
-// in its own boot order (dispatching `EchoLoaded` when it does).
+// Reverb/Pusher bridge subscribed from JS: Livewire's native `echo-` listeners silently no-op when window.Echo boots late.
 const sidekickEchoChannels = new Set();
 
 const sidekickEchoSubscribe = (el) => {
@@ -27,9 +24,7 @@ const sidekickEchoSubscribe = (el) => {
     window.Echo ? listen() : window.addEventListener('EchoLoaded', listen, { once: true });
 };
 
-// wire:navigate swaps in a fresh <body> without re-running the panel's inline
-// boot script — re-apply the state classes it set at first paint. (Fires on
-// the initial load too; everything here is idempotent.)
+// wire:navigate swaps in a fresh <body> without re-running the panel's inline boot script — re-apply its state classes (idempotent; also fires on initial load).
 document.addEventListener('livewire:navigated', () => {
     const boot = window.__sidekickBoot;
 
@@ -43,6 +38,7 @@ document.addEventListener('livewire:navigated', () => {
         'sidekick-open',
         window.Alpine?.store('sidekick')?.open ?? localStorage.getItem('sidekick.open') === '1',
     );
+    boot.topbar?.();
     document.body.classList.add('sidekick-ready');
 });
 
@@ -54,8 +50,7 @@ window.addEventListener('sidekick-navigate', (event) => {
         return;
     }
 
-    // Soft-navigate where Livewire supports it (SPA mode keeps the panel —
-    // and the conversation — alive through the redirect); hard fallback otherwise.
+    // Soft-navigate where supported (SPA mode keeps the panel and conversation alive through the redirect); hard fallback otherwise.
     if (window.Livewire?.navigate) {
         window.Livewire.navigate(url);
     } else {
@@ -66,8 +61,7 @@ window.addEventListener('sidekick-navigate', (event) => {
 document.addEventListener('alpine:init', () => {
     if (! window.Alpine.store('sidekick')) {
         window.Alpine.store('sidekick', {
-            // The panel blade's inline script applies the persisted state to the
-            // body before first paint; the store adopts it as the source of truth.
+            // The panel blade's inline script applied the persisted state before first paint; adopt it as the source of truth.
             open: document.body.classList.contains('sidekick-open'),
 
             toggle() {
@@ -87,18 +81,14 @@ document.addEventListener('alpine:init', () => {
         });
     }
 
-    // Echo bridge host — sits on the panel root so the subscription happens
-    // whenever the (lazy) component actually lands in the DOM.
+    // Echo bridge host — sits on the panel root so the subscription happens when the component actually lands in the DOM.
     window.Alpine.data('sidekickEcho', () => ({
         init() {
             sidekickEchoSubscribe(this.$el);
         },
     }));
 
-    // Sticky auto-scroll: follows new content only while the user is already
-    // near the bottom, so reading scrollback is never hijacked. The end is the
-    // default position — sending (or resolving a card) always jumps back to it
-    // via the `sidekick-jump-to-end` event.
+    // Sticky auto-scroll: follows new content only while the user is near the bottom, so reading scrollback is never hijacked.
     window.Alpine.data('sidekickLog', () => ({
         stick: true,
 
@@ -111,9 +101,7 @@ document.addEventListener('alpine:init', () => {
                 }
             }).observe(this.$el, { childList: true, characterData: true, subtree: true });
 
-            // Size changes move the bottom edge without any DOM mutation
-            // inside the log — the panel opening from zero width, and the
-            // composer/card swap changing the log's height. Re-stick on both.
+            // Size changes (panel opening from zero width, composer/card swap) move the bottom edge without a DOM mutation — re-stick.
             new ResizeObserver(() => {
                 if (this.stick) {
                     this.toBottom();
@@ -135,9 +123,7 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 
-    // Typewriter for the streaming bubble: server polls land text in chunks;
-    // this re-truncates each chunk and reveals it letter by letter, pacing up
-    // with the backlog so it never falls behind the stream.
+    // Typewriter for the streaming bubble: reveals each polled chunk letter by letter, pacing up with the backlog.
     window.Alpine.data('sidekickStream', () => ({
         shown: '',
         target: '',
@@ -180,10 +166,7 @@ document.addEventListener('alpine:init', () => {
                     return;
                 }
 
-                // Spread the backlog across roughly one poll interval so the
-                // reveal is a steady letter-by-letter flow instead of a
-                // sprint-then-stall per chunk. The fractional carry keeps
-                // sub-1-char-per-frame speeds smooth.
+                // Spread the backlog across ~one poll interval for a steady flow; the fractional carry keeps sub-1-char-per-frame speeds smooth.
                 const backlog = this.target.length - this.shown.length;
                 this.carry += Math.min(Math.max(backlog / 90, 0.45), 8);
 

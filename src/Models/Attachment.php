@@ -7,14 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
-/**
- * A file the user attached in the chat panel. Files live TEMPORARILY on a
- * host-configured disk and are referenced by id everywhere; only
- * name/mime/size metadata is ever surfaced to the model. The whole area is
- * swept by sidekick:prune-attachments — a confirmed action copies the file
- * into the host's own storage, chat history keeps only the metadata, and an
- * unconsumed file is simply irrelevant after the retention window.
- */
+/** A chat upload, stored temporarily on a host-configured disk and swept by sidekick:prune-attachments; only name/mime/size metadata ever reaches the model. */
 class Attachment extends Model
 {
     use HasUuids;
@@ -67,9 +60,7 @@ class Attachment extends Model
             $storage = Storage::disk($this->disk);
             $storage->delete($this->path);
 
-            // Each upload gets its own uuid folder — remove it once empty so
-            // pruning doesn't leave directory debris. Guarded on emptiness in
-            // case a host configured a flat directory layout.
+            // Remove the upload's uuid folder once empty; guarded on emptiness in case a host configured a flat layout.
             $directory = dirname($this->path);
 
             if ($directory !== '.'

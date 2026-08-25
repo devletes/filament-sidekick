@@ -13,7 +13,19 @@ return new class extends Migration
         $runs = config('sidekick.tables.runs', 'sidekick_runs');
 
         // laravel/ai's own (publish-only) migration creates the same two
-        // tables — guard so the package coexists with a published copy.
+        // tables without our columns — create, or top up what's missing.
+        if (Schema::hasTable($conversations)) {
+            Schema::table($conversations, function (Blueprint $table) use ($conversations) {
+                if (! Schema::hasColumn($conversations, 'tenant_id')) {
+                    $table->unsignedBigInteger('tenant_id')->nullable();
+                }
+
+                if (! Schema::hasColumn($conversations, 'channel')) {
+                    $table->string('channel', 16)->default('web');
+                }
+            });
+        }
+
         if (! Schema::hasTable($conversations)) {
             Schema::create($conversations, function (Blueprint $table) {
                 $table->string('id', 36)->primary();
@@ -69,8 +81,8 @@ return new class extends Migration
 
     public function down(): void
     {
+        // The conversation tables are shared with laravel/ai and may predate
+        // this package — dropping them here would destroy the host's data.
         Schema::dropIfExists(config('sidekick.tables.runs', 'sidekick_runs'));
-        Schema::dropIfExists(config('ai.conversations.tables.messages', 'agent_conversation_messages'));
-        Schema::dropIfExists(config('ai.conversations.tables.conversations', 'agent_conversations'));
     }
 };

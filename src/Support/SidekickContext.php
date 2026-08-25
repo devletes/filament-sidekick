@@ -5,11 +5,7 @@ namespace Devletes\Sidekick\Support;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Builder;
 
-/**
- * Host-app seam: stamps extra columns onto new conversations and constrains
- * conversation queries (multi-tenant hosts bind an implementation that adds
- * tenant scoping; the default is single-context).
- */
+/** Host-app seam: stamps extra columns onto new conversations and constrains conversation queries (e.g. tenant scoping). */
 interface SidekickContext
 {
     /** Extra attributes merged into new conversation rows. */

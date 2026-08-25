@@ -1,16 +1,32 @@
 <?php
 
+use Devletes\Sidekick\Agents\ChatAgent;
+use Devletes\Sidekick\Jobs\RunChatTurn;
+
 return [
 
     'enabled' => env('SIDEKICK_ENABLED', true),
 
     // The laravel/ai agent class that answers chat turns. Must use the
     // Promptable + RemembersConversations traits (see ChatAgent).
-    'agent' => \Devletes\Sidekick\Agents\ChatAgent::class,
+    'agent' => ChatAgent::class,
 
     'assistant' => [
         'name' => 'Assistant',
         'description' => 'Ask me anything about your workspace.',
+    ],
+
+    // Any icon your app has registered (Heroicons ship with Filament). The
+    // toggle icon can also be overridden per panel — including with raw SVG —
+    // via SidekickPlugin::make()->icon(...).
+    'icons' => [
+        'assistant' => 'heroicon-o-sparkles',
+        'new_conversation' => 'heroicon-m-plus',
+        'close' => 'heroicon-m-x-mark',
+        'attach' => 'heroicon-m-paper-clip',
+        'send' => 'heroicon-m-arrow-up',
+        'remove' => 'heroicon-m-x-mark',
+        'tool_done' => 'heroicon-m-check',
     ],
 
     // Appended verbatim to the agent's system instructions when set.
@@ -34,11 +50,57 @@ return [
 
     'max_prompt_length' => 4000,
 
-    // Chat tools (class names implementing Contracts\ChatTool).
+    // Chat tools (class names implementing Contracts\ChatTool). Usually
+    // unnecessary: classes in app/Sidekick/Tools are discovered automatically,
+    // and packages can register via the Sidekick facade. List classes here to
+    // add ones living elsewhere — or to give a profile its own tool set.
     'tools' => [],
 
-    // Confirmable write actions (class names implementing Contracts\ActionHandler).
+    // Confirmable write actions (class names implementing
+    // Contracts\ActionHandler — extend Support\SidekickAction). Same deal:
+    // app/Sidekick/Actions is discovered automatically.
     'actions' => [],
+
+    // Zero-registration discovery. Every non-abstract class in these
+    // directories implementing the right contract joins the assistant.
+    // null paths → app/Sidekick/Tools and app/Sidekick/Actions.
+    'discover' => [
+        'enabled' => true,
+        'tools' => null,
+        'actions' => null,
+    ],
+
+    // Built-in tools. Navigate + PresentActions wake automatically once an
+    // ActionResolver with targets is bound; set false to keep one off anyway.
+    'builtin_tools' => [
+        'navigate' => true,
+        'present_actions' => true,
+    ],
+
+    // Maps named navigation targets to URLs (Contracts\ActionResolver) — the
+    // wiring that wakes the built-in tools above. Set a class here, or bind
+    // the contract yourself in a service provider (a binding wins over this).
+    // sidekick:scaffold generates an implementation from your Filament resources.
+    'action_resolver' => null,
+
+    // php artisan sidekick:scaffold — generates baseline search tools, a
+    // resolver, and (with --actions) action stubs from your Filament resources.
+    'scaffold' => [
+        // Only scaffold these resources (empty = every panel resource).
+        // A plain class list, or class => panel id to pin which panel's
+        // URLs the resolver generates.
+        'only' => [],
+
+        // Resources the scaffolder always skips. Re-runs never overwrite
+        // existing files, so list deleted scaffolds here to keep them gone.
+        'ignore' => [],
+    ],
+
+    // Usage limits. Sidekick records token usage per turn (sidekick_runs.usage)
+    // but enforces nothing by default. Point this at a Contracts\UsageLimiter
+    // implementation to gate turns — per user, per tenant, requests or tokens,
+    // backed by config or your own CRUD. A container binding wins over this.
+    'usage_limiter' => null,
 
     // Minutes before an unconfirmed action card expires.
     'actions_expire_after' => 15,
@@ -75,7 +137,7 @@ return [
 
     'jobs' => [
         // Swap for a subclass to add app concerns (tenancy, metering).
-        'run' => \Devletes\Sidekick\Jobs\RunChatTurn::class,
+        'run' => RunChatTurn::class,
         'queue' => null,
     ],
 

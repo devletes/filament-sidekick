@@ -7,12 +7,7 @@ use Laravel\Ai\Messages\AssistantMessage;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Storage\DatabaseConversationStore;
 
-/**
- * History rehydration without the bulk: past tool calls/results are stripped
- * from context (the model re-calls tools for fresh data instead of reasoning
- * over stale payloads), keeping per-turn prompt tokens flat as chats grow.
- * Writes are untouched — the full record stays in the database.
- */
+/** Rehydrates history without past tool calls/results (the model re-calls tools for fresh data); writes keep the full record. */
 class LeanConversationStore extends DatabaseConversationStore
 {
     public function getLatestConversationMessages(string $conversationId, int $limit): Collection
@@ -27,10 +22,7 @@ class LeanConversationStore extends DatabaseConversationStore
             ->flatMap(function ($record): array {
                 $content = (string) $record->content;
 
-                // Stored user rows hold the clean text; the attachment note is
-                // re-appended here so files from past turns stay referencable
-                // (by name + attachment_id) without their contents ever
-                // entering context.
+                // Re-append the attachment note so files from past turns stay referencable without contents entering context.
                 if ($record->role === 'user') {
                     $note = $this->attachmentNote($record->attachments ?? null);
 

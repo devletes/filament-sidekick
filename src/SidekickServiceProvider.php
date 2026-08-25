@@ -2,12 +2,27 @@
 
 namespace Devletes\Sidekick;
 
+use Devletes\Sidekick\Assets\HashedCss;
+use Devletes\Sidekick\Assets\HashedJs;
+use Devletes\Sidekick\Console\InstallCommand;
+use Devletes\Sidekick\Console\MakeActionCommand;
+use Devletes\Sidekick\Console\MakeToolCommand;
+use Devletes\Sidekick\Console\PruneAttachments;
+use Devletes\Sidekick\Console\ScaffoldCommand;
+use Devletes\Sidekick\Contracts\ActionResolver;
+use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Livewire\ChatPanel;
-use Devletes\Sidekick\Support\SidekickContext;
+use Devletes\Sidekick\Storage\LeanConversationStore;
 use Devletes\Sidekick\Support\DefaultSidekickContext;
+use Devletes\Sidekick\Support\NullActionResolver;
+use Devletes\Sidekick\Support\Profiles;
+use Devletes\Sidekick\Support\SidekickContext;
+use Devletes\Sidekick\Support\SidekickManager;
+use Devletes\Sidekick\Support\UnlimitedUsage;
 use Filament\Support\Facades\FilamentAsset;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Ai\Contracts\ConversationStore;
 use Livewire\Livewire;
 
 class SidekickServiceProvider extends ServiceProvider
@@ -16,22 +31,30 @@ class SidekickServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__.'/../config/sidekick.php', 'sidekick');
 
+        $this->app->singleton(SidekickManager::class);
         $this->app->singletonIf(SidekickContext::class, DefaultSidekickContext::class);
         $this->app->singletonIf(
-            \Devletes\Sidekick\Contracts\ActionResolver::class,
-            \Devletes\Sidekick\Support\NullActionResolver::class,
+            ActionResolver::class,
+            fn ($app) => $app->make(
+                config('sidekick.action_resolver') ?? NullActionResolver::class,
+            ),
         );
-        $this->app->singleton(\Devletes\Sidekick\Support\Profiles::class);
+        $this->app->singletonIf(
+            UsageLimiter::class,
+            fn ($app) => $app->make(
+                config('sidekick.usage_limiter') ?? UnlimitedUsage::class,
+            ),
+        );
+        $this->app->singleton(Profiles::class);
     }
 
     public function boot(): void
     {
-        // In boot (after every register) so it deterministically overrides
-        // laravel/ai's own ConversationStore binding.
+        // Bound in boot (after all registers) so it overrides laravel/ai's own ConversationStore binding.
         if (config('sidekick.lean_history', true)) {
             $this->app->singleton(
-                \Laravel\Ai\Contracts\ConversationStore::class,
-                \Devletes\Sidekick\Storage\LeanConversationStore::class,
+                ConversationStore::class,
+                LeanConversationStore::class,
             );
         }
 
@@ -50,13 +73,17 @@ class SidekickServiceProvider extends ServiceProvider
 
         if ($this->app->runningInConsole()) {
             $this->commands([
-                \Devletes\Sidekick\Console\PruneAttachments::class,
+                InstallCommand::class,
+                MakeToolCommand::class,
+                MakeActionCommand::class,
+                ScaffoldCommand::class,
+                PruneAttachments::class,
             ]);
         }
 
         FilamentAsset::register([
-            \Devletes\Sidekick\Assets\HashedCss::make('sidekick', __DIR__.'/../resources/css/sidekick.css'),
-            \Devletes\Sidekick\Assets\HashedJs::make('sidekick', __DIR__.'/../resources/js/sidekick.js'),
+            HashedCss::make('sidekick', __DIR__.'/../resources/css/sidekick.css'),
+            HashedJs::make('sidekick', __DIR__.'/../resources/js/sidekick.js'),
         ], package: 'devletes/filament-sidekick');
 
         Broadcast::channel('sidekick.user.{userId}', function ($user, string $userId): bool {

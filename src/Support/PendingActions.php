@@ -2,14 +2,13 @@
 
 namespace Devletes\Sidekick\Support;
 
+use Devletes\Sidekick\Contracts\ProposableAction;
+use Devletes\Sidekick\Enums\ConfirmationMode;
 use Devletes\Sidekick\Models\PendingAction;
 use Illuminate\Contracts\Auth\Authenticatable;
 use InvalidArgumentException;
 
-/**
- * Called by write tools during a run: validates the proposal via the handler
- * and stores the card. Execution only ever happens from the panel's Confirm.
- */
+/** Validates proposals via the handler and stores the card; execution only ever happens from the panel's Confirm. */
 class PendingActions
 {
     public function __construct(protected ActionRegistry $registry) {}
@@ -45,11 +44,10 @@ class PendingActions
             'type' => $type,
             'payload' => $prepared['payload'],
             'preview' => $prepared['preview'],
-            // Optional upload spec ({required, label, multiple}) — presence
-            // makes the confirm card render a file field whose ids are merged
-            // into the payload at execute time.
+            // Optional upload spec ({required, label, multiple}): presence makes the confirm card render a file field.
             'upload' => $prepared['upload'] ?? null,
             'summary' => $prepared['summary'],
+            'confirmation' => ($handler instanceof ProposableAction ? $handler->confirmation() : ConfirmationMode::Inline)->value,
             'status' => PendingAction::STATUS_PROPOSED,
             'expires_at' => now()->addMinutes((int) config('sidekick.actions_expire_after', 15)),
         ]);

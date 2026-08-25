@@ -2,26 +2,29 @@
 
 namespace Devletes\Sidekick\Livewire;
 
+use Devletes\Sidekick\Contracts\ActionResolver;
+use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Models\Attachment;
 use Devletes\Sidekick\Models\Conversation;
 use Devletes\Sidekick\Models\ConversationMessage;
+use Devletes\Sidekick\Models\PendingAction;
 use Devletes\Sidekick\Models\Run;
+use Devletes\Sidekick\Support\ActionRegistry;
 use Devletes\Sidekick\Support\AttachmentStore;
+use Devletes\Sidekick\Support\Profiles;
 use Devletes\Sidekick\Support\SidekickContext;
 use Devletes\Sidekick\Support\ToolRegistry;
+use Filament\Models\Contracts\HasName;
 use Illuminate\Contracts\View\View;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 
-// Deliberately NOT #[Lazy]: an eager render costs ~one exists() query and
-// avoids a placeholder flash when the panel slides open. (The earlier
-// rationale here — "Filament panels boot Alpine without the intersect
-// plugin" — was a misdiagnosis: x-intersect works fine in Filament v5.6
-// panels; the "never fires" repro ran in a hidden Chrome tab, where
-// IntersectionObserver callbacks are never delivered.)
+// Deliberately NOT #[Lazy]: an eager render costs ~one exists() query and avoids a placeholder flash on open.
 class ChatPanel extends Component
 {
     use WithFileUploads;
@@ -44,10 +47,18 @@ class ChatPanel extends Component
 
     public ?string $uploadError = null;
 
+    /** Whether the modal-mode confirm card is currently on screen. */
+    public bool $actionModalOpen = false;
+
+    /** The modal-mode action last seen by a render, so only a newly proposed one re-opens the modal. */
+    public ?string $actionModalId = null;
+
+    /** False until the first render, which is how a page load is told apart from a proposal arriving live. */
+    public bool $actionModalPrimed = false;
+
     public function mount(): void
     {
-        // Fresh context by default: the panel opens on a new chat and the
-        // previous conversation is one click away (resumeConversation).
+        // Deliberately empty: the panel opens on a fresh chat; the last conversation is one click away (resumeConversation).
     }
 
     public function resumeConversation(): void
@@ -61,14 +72,13 @@ class ChatPanel extends Component
         )
             ->latest('updated_at')
             ->value('id');
+
+        $this->forgetActionModal();
     }
 
     public function getListeners(): array
     {
-        // The echo subscription lives in JS (sidekick.js): Filament boots
-        // window.Echo in its own time, and Livewire's native `echo-`
-        // listeners silently no-op when Echo isn't there yet. The bridge
-        // pokes this plain listener on every broadcast instead.
+        // Echo subscription lives in JS (sidekick.js): Livewire's native `echo-` listeners silently no-op when window.Echo boots late.
         return ['sidekick-echo-nudge' => '$refresh'];
     }
 
@@ -78,7 +88,6 @@ class ChatPanel extends Component
         $text = Str::limit(trim($this->draft), (int) config('sidekick.max_prompt_length', 4000), '');
         $staged = $this->stagedRows();
 
-        // A message can be text, files, or both — never neither.
         if (! $user || ($text === '' && $staged->isEmpty()) || ! config('sidekick.enabled')) {
             return;
         }
@@ -93,8 +102,7 @@ class ChatPanel extends Component
 
         $conversation = $this->resolveConversation($user, $text !== '' ? $text : (string) $staged->first()?->name);
 
-        // Dead runs (worker down, crash before failed() fired) would block
-        // the composer forever — resolve them before checking for activity.
+        // Dead runs (worker crash before failed() fired) would block the composer forever — fail them before the active check.
         $this->failStaleRuns($conversation);
 
         if ($conversation->runs()->active()->exists()) {
@@ -106,8 +114,26 @@ class ChatPanel extends Component
             return;
         }
 
-        // Claim the staged files for this message: from here they are part of
-        // the conversation record (and out of the prune command's reach).
+        // A usage-limiter denial lands as a failed run (renders like any run error) without queueing; staged files stay staged.
+        $denial = app(UsageLimiter::class)->check($user, $conversation->id);
+
+        if ($denial !== null) {
+            $conversation->runs()->create([
+                'user_id' => $user->getAuthIdentifier(),
+                'prompt' => $text,
+                'status' => Run::STATUS_FAILED,
+                'error' => Str::limit($denial, 480),
+                'denied' => true,
+                'finished_at' => now(),
+            ]);
+
+            $this->draft = '';
+            $this->dispatch('sidekick-jump-to-end');
+
+            return;
+        }
+
+        // Claiming links the files to the conversation and puts them out of the prune command's reach.
         if ($staged->isNotEmpty()) {
             Attachment::query()
                 ->forUser($user)
@@ -129,8 +155,6 @@ class ChatPanel extends Component
         $this->staged = [];
         $this->uploadError = null;
 
-        // Sending always returns the view to the end of the conversation,
-        // even if the user had scrolled up into history.
         $this->dispatch('sidekick-jump-to-end');
     }
 
@@ -144,7 +168,8 @@ class ChatPanel extends Component
 
         $lastRun = $conversation->runs()->latest()->first();
 
-        if (! $lastRun || $lastRun->status !== Run::STATUS_FAILED) {
+        // Denied runs are a policy outcome, not a glitch — retrying just hammers the limiter.
+        if (! $lastRun || $lastRun->status !== Run::STATUS_FAILED || $lastRun->denied) {
             return;
         }
 
@@ -183,11 +208,7 @@ class ChatPanel extends Component
         $this->discardStaged($attachmentId, 'cardStaged');
     }
 
-    /**
-     * Detach a chat-referenced attachment from the live proposal's payload.
-     * The attachment itself is untouched — it's part of the conversation
-     * record; only this action stops using it.
-     */
+    /** Detach an attachment from the live proposal's payload; the attachment itself stays in the conversation record. */
     public function removeProposalAttachment(string $actionId, string $attachmentId): void
     {
         $action = $this->ownedAction($actionId);
@@ -239,13 +260,11 @@ class ChatPanel extends Component
             } catch (\InvalidArgumentException $e) {
                 $this->uploadError = $e->getMessage();
             } catch (\Throwable $e) {
-                // A vanished/unreadable temp file must degrade to a retry
-                // hint, never a 500 that eats the whole panel update.
+                // A vanished temp file must degrade to a retry hint, never a 500 that eats the whole panel update.
                 report($e);
                 $this->uploadError = 'That upload didn\'t come through — please try again.';
             } finally {
-                // The Livewire temp copy is spent either way (same-disk
-                // stores were already MOVED by storeAs; this covers the rest).
+                // The Livewire temp copy is spent either way (same-disk stores already moved it; this covers the rest).
                 rescue(fn () => $file->delete(), report: false);
             }
         }
@@ -268,12 +287,11 @@ class ChatPanel extends Component
     }
 
     /**
-     * The staged ids re-proven against the database (ownership + still
-     * staged), in staging order.
+     * The staged ids re-proven against the database (ownership + still staged), in staging order.
      *
-     * @return \Illuminate\Support\Collection<int, Attachment>
+     * @return Collection<int, Attachment>
      */
-    protected function stagedRows(string $target = 'staged'): \Illuminate\Support\Collection
+    protected function stagedRows(string $target = 'staged'): Collection
     {
         if ($this->{$target} === [] || ! auth()->check()) {
             return collect();
@@ -292,6 +310,20 @@ class ChatPanel extends Component
     {
         $this->conversationId = null;
         $this->draft = '';
+        $this->forgetActionModal();
+    }
+
+    public function updatedConversationId(): void
+    {
+        $this->forgetActionModal();
+    }
+
+    /** Re-prime on a conversation switch: a card already pending there gets the dock link, not a modal springing open. */
+    protected function forgetActionModal(): void
+    {
+        $this->actionModalOpen = false;
+        $this->actionModalId = null;
+        $this->actionModalPrimed = false;
     }
 
     protected function resolveConversation(object $user, string $firstMessage): Conversation
@@ -305,7 +337,7 @@ class ChatPanel extends Component
         $conversation = new Conversation([
             ...app(SidekickContext::class)->attributes($user),
             'user_id' => $user->getAuthIdentifier(),
-            'profile' => app(\Devletes\Sidekick\Support\Profiles::class)->current(),
+            'profile' => app(Profiles::class)->current(),
             'title' => Str::limit($firstMessage, 60, preserveWords: true),
         ]);
 
@@ -323,9 +355,7 @@ class ChatPanel extends Component
             return null;
         }
 
-        // Re-scoped on every call: the id is client-provided state, so
-        // ownership + context (including the panel's profile) must be
-        // re-proven per request.
+        // The id is client-provided state: ownership + profile scope must be re-proven per request.
         return $this->scopeToProfile(
             Conversation::query()->forParticipant(auth()->user()),
         )
@@ -333,13 +363,10 @@ class ChatPanel extends Component
             ->first();
     }
 
-    /**
-     * Each panel's assistant only ever sees its own profile's conversations —
-     * the admin-side assistant and the employee one don't share history.
-     */
-    protected function scopeToProfile(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    /** Each panel's assistant only sees its own profile's conversations — different panels don't share history. */
+    protected function scopeToProfile(Builder $query): Builder
     {
-        $profile = app(\Devletes\Sidekick\Support\Profiles::class)->current();
+        $profile = app(Profiles::class)->current();
 
         return $profile === null
             ? $query->whereNull('profile')
@@ -388,8 +415,17 @@ class ChatPanel extends Component
         $pendingActions = $this->pendingActions();
         $activeAction = $pendingActions->first(fn ($action) => $action->isConfirmable());
 
-        // One chronological stream: outcome lines sit where their action was
-        // proposed, not clumped after the messages.
+        // A modal card opens itself when proposed mid-session. On a page load the
+        // component is unprimed, so it stays shut and the dock offers a link back
+        // in — an unexpected modal on load reads as a trap.
+        if ($activeAction?->rendersInModal() && $this->actionModalPrimed && $this->actionModalId !== $activeAction->id) {
+            $this->actionModalOpen = true;
+        }
+
+        $this->actionModalId = $activeAction?->rendersInModal() ? $activeAction->id : null;
+        $this->actionModalPrimed = true;
+
+        // One chronological stream: outcome lines sort where their action was proposed, not clumped after the messages.
         $timeline = $messages
             ->map(fn ($message) => [
                 'kind' => 'message',
@@ -428,19 +464,47 @@ class ChatPanel extends Component
             'cardAttachments' => $this->stagedRows('cardStaged'),
             'cardPayloadAttachments' => $activeAction ? $this->payloadAttachmentRows($activeAction) : collect(),
             'activeRunAttachments' => $activeRun ? $this->runAttachmentRows($activeRun) : collect(),
-            'assistantName' => config('sidekick.assistant.name', 'Assistant'),
+            'assistantName' => $assistantName = config('sidekick.assistant.name', 'Assistant'),
             'assistantDescription' => config('sidekick.assistant.description'),
-            // Broadcast per USER: the panel mounts on a fresh conversation,
-            // so the user id is the only stable subscription key.
+            'greeting' => $this->greeting($assistantName),
+            'maxPromptLength' => (int) config('sidekick.max_prompt_length', 4000),
+            'actionModalId' => $this->getId().'-action',
+            // Broadcast per user: the panel mounts on a fresh conversation, so the user id is the only stable subscription key.
             'echoChannel' => config('sidekick.broadcasting.enabled') && auth()->check()
                 ? 'sidekick.user.'.auth()->id()
                 : null,
-            // With broadcasting on, echo nudges carry the stream and polling
-            // drops back to a safety net.
+            // With broadcasting on, echo nudges carry the stream and polling drops back to a safety net.
             'pollInterval' => config('sidekick.broadcasting.enabled')
                 ? config('sidekick.polling.while_broadcasting', '10s')
                 : config('sidekick.polling.interval', '2s'),
         ]);
+    }
+
+    /** Greets by first name when the user model exposes one, in any of Filament's usual shapes. */
+    protected function greeting(string $assistantName): string
+    {
+        $user = auth()->user();
+
+        $name = match (true) {
+            $user instanceof HasName => $user->getFilamentName(),
+            default => (string) (($user?->name ?? $user?->first_name) ?? ''),
+        };
+
+        $firstName = trim(strtok(trim($name), ' ') ?: '');
+
+        return $firstName === ''
+            ? "I'm {$assistantName}"
+            : "Hi {$firstName} — I'm {$assistantName}";
+    }
+
+    /** Re-open a modal confirmation the user escaped by reloading the page. */
+    public function openActionModal(): void
+    {
+        $action = $this->activeAction();
+
+        if ($action?->rendersInModal()) {
+            $this->actionModalOpen = true;
+        }
     }
 
     public function confirmAction(string $actionId): void
@@ -451,10 +515,10 @@ class ChatPanel extends Component
             return;
         }
 
-        $handler = app(\Devletes\Sidekick\Support\ActionRegistry::class)->handler($action->type);
+        $handler = app(ActionRegistry::class)->handler($action->type);
 
         if (! $handler) {
-            $action->update(['status' => \Devletes\Sidekick\Models\PendingAction::STATUS_FAILED, 'result' => 'No handler registered.']);
+            $action->update(['status' => PendingAction::STATUS_FAILED, 'result' => 'No handler registered.']);
             $this->cardUploads = [];
             $this->cardStaged = [];
 
@@ -463,20 +527,28 @@ class ChatPanel extends Component
 
         $payload = $this->payloadWithCardAttachments($action);
 
-        // Server-side twin of the disabled Confirm button: a required upload
-        // must be on the payload before the handler ever runs.
+        // Server-side twin of the disabled Confirm button: a required upload must be present before the handler runs.
         if ($payload === null) {
             return;
         }
 
+        // Atomic claim: concurrent clicks (e.g. a second tab) must not both reach execute().
+        $claimed = PendingAction::query()
+            ->whereKey($action->id)
+            ->where('status', PendingAction::STATUS_PROPOSED)
+            ->update(['status' => PendingAction::STATUS_EXECUTING]);
+
+        if ($claimed !== 1) {
+            return;
+        }
+
         try {
-            // Execution happens HERE, under the user's real click + session —
-            // the handler re-validates everything against live data.
+            // Executes under the user's real click + session; the handler re-validates against live data.
             $result = $handler->execute($payload, auth()->user());
 
             $action->update([
-                'status' => \Devletes\Sidekick\Models\PendingAction::STATUS_EXECUTED,
-                'result' => \Illuminate\Support\Str::limit($result, 480),
+                'status' => PendingAction::STATUS_EXECUTED,
+                'result' => Str::limit($result, 480),
                 'executed_at' => now(),
             ]);
 
@@ -485,19 +557,18 @@ class ChatPanel extends Component
             report($e);
 
             $action->update([
-                'status' => \Devletes\Sidekick\Models\PendingAction::STATUS_FAILED,
-                'result' => \Illuminate\Support\Str::limit($e instanceof \InvalidArgumentException ? $e->getMessage() : 'Something went wrong executing this action.', 480),
+                'status' => PendingAction::STATUS_FAILED,
+                'result' => Str::limit($e instanceof \InvalidArgumentException ? $e->getMessage() : 'Something went wrong executing this action.', 480),
             ]);
 
             $this->acknowledge($action, "That didn't go through — {$action->result}");
         } finally {
-            // Either way the card leaves the dock; its upload state goes with it.
+            // Either way the card leaves the screen; its upload state goes with it.
             $this->cardUploads = [];
             $this->cardStaged = [];
+            $this->actionModalOpen = false;
         }
 
-        // The composer returns where the card was — put the outcome in view
-        // and the cursor back in the field.
         $this->dispatch('sidekick-jump-to-end');
         $this->dispatch('sidekick-focus-composer');
     }
@@ -507,7 +578,7 @@ class ChatPanel extends Component
         $action = $this->ownedAction($actionId);
 
         if ($action && $action->isConfirmable()) {
-            $action->update(['status' => \Devletes\Sidekick\Models\PendingAction::STATUS_CANCELLED]);
+            $action->update(['status' => PendingAction::STATUS_CANCELLED]);
 
             // Files uploaded on the card served nothing — remove them.
             foreach ($this->stagedRows('cardStaged') as $attachment) {
@@ -517,6 +588,7 @@ class ChatPanel extends Component
             $this->cardUploads = [];
             $this->cardStaged = [];
             $this->uploadError = null;
+            $this->actionModalOpen = false;
 
             $this->acknowledge($action, "Okay, cancelled — {$action->summary}. Nothing was submitted.");
 
@@ -525,13 +597,8 @@ class ChatPanel extends Component
         }
     }
 
-    /**
-     * The action payload with card-uploaded attachment ids merged into
-     * `attachment_ids`, or null when a required upload is still missing.
-     * Claiming happens here (status → sent, linked to the conversation) so
-     * the files survive pruning for handlers that keep path references.
-     */
-    protected function payloadWithCardAttachments(\Devletes\Sidekick\Models\PendingAction $action): ?array
+    /** Payload with card-uploaded ids merged into `attachment_ids` (claimed as sent so they survive pruning), or null when a required upload is missing. */
+    protected function payloadWithCardAttachments(PendingAction $action): ?array
     {
         $payload = $action->payload ?? [];
         $cardRows = $this->stagedRows('cardStaged');
@@ -557,12 +624,8 @@ class ChatPanel extends Component
         return $payload;
     }
 
-    /**
-     * Hardcoded (not LLM) acknowledgment, persisted as a real assistant
-     * message: instant + deterministic, lands in history, and the model sees
-     * it in context on the next turn.
-     */
-    protected function acknowledge(\Devletes\Sidekick\Models\PendingAction $action, string $text): void
+    /** Hardcoded (not LLM) acknowledgment persisted as a real assistant message so the model sees it in context next turn. */
+    protected function acknowledge(PendingAction $action, string $text): void
     {
         $message = new ConversationMessage([
             'conversation_id' => $action->conversation_id,
@@ -576,48 +639,51 @@ class ChatPanel extends Component
             'usage' => [],
             'meta' => ['sidekick_ack' => true],
         ]);
-        $message->id = (string) \Illuminate\Support\Str::uuid7();
+        $message->id = (string) Str::uuid7();
         $message->save();
 
         Conversation::query()->whereKey($action->conversation_id)->update(['updated_at' => now()]);
     }
 
-    protected function ownedAction(string $actionId): ?\Devletes\Sidekick\Models\PendingAction
+    protected function ownedAction(string $actionId): ?PendingAction
     {
         if (! auth()->check() || ! $this->conversationId) {
             return null;
         }
 
-        return \Devletes\Sidekick\Models\PendingAction::query()
+        return PendingAction::query()
             ->whereKey($actionId)
             ->where('conversation_id', $this->conversationId)
             ->where('user_id', auth()->id())
             ->first();
     }
 
-    protected function activeAction(): ?\Devletes\Sidekick\Models\PendingAction
+    protected function activeAction(): ?PendingAction
     {
         return $this->pendingActions()->first(
-            fn (\Devletes\Sidekick\Models\PendingAction $action): bool => $action->isConfirmable(),
+            fn (PendingAction $action): bool => $action->isConfirmable(),
         );
     }
 
-    /** @return \Illuminate\Support\Collection<int, \Devletes\Sidekick\Models\PendingAction> */
-    protected function pendingActions(): \Illuminate\Support\Collection
+    /** @return Collection<int, PendingAction> */
+    protected function pendingActions(): Collection
     {
-        if (! $this->conversationId) {
+        // Scoped to the signed-in user, not just the client-supplied conversation id — a leaked id must never render someone else's cards.
+        if (! $this->conversationId || ! auth()->check()) {
             return collect();
         }
 
-        // Lazily expire overdue proposals so cards can't be confirmed stale.
-        \Devletes\Sidekick\Models\PendingAction::query()
+        $owned = fn (): Builder => PendingAction::query()
             ->where('conversation_id', $this->conversationId)
-            ->where('status', \Devletes\Sidekick\Models\PendingAction::STATUS_PROPOSED)
-            ->where('expires_at', '<', now())
-            ->update(['status' => \Devletes\Sidekick\Models\PendingAction::STATUS_EXPIRED]);
+            ->where('user_id', auth()->id());
 
-        return \Devletes\Sidekick\Models\PendingAction::query()
-            ->where('conversation_id', $this->conversationId)
+        // Lazily expire overdue proposals so cards can't be confirmed stale.
+        $owned()
+            ->where('status', PendingAction::STATUS_PROPOSED)
+            ->where('expires_at', '<', now())
+            ->update(['status' => PendingAction::STATUS_EXPIRED]);
+
+        return $owned()
             ->where('created_at', '>=', now()->subHours(2))
             ->latest('id')
             ->limit(4)
@@ -627,13 +693,11 @@ class ChatPanel extends Component
     }
 
     /**
-     * Attachments the proposal's payload already references (convention key
-     * `attachment_ids`) — rendered as chips on the card in the same style as
-     * files uploaded there, so all of an action's attachments read as one set.
+     * Attachments the proposal's payload references (`attachment_ids`), rendered as chips on the card.
      *
-     * @return \Illuminate\Support\Collection<int, Attachment>
+     * @return Collection<int, Attachment>
      */
-    protected function payloadAttachmentRows(\Devletes\Sidekick\Models\PendingAction $action): \Illuminate\Support\Collection
+    protected function payloadAttachmentRows(PendingAction $action): Collection
     {
         $ids = array_values(array_filter((array) ($action->payload['attachment_ids'] ?? []), 'is_string'));
 
@@ -649,8 +713,8 @@ class ChatPanel extends Component
             ->values();
     }
 
-    /** @return \Illuminate\Support\Collection<int, Attachment> */
-    protected function runAttachmentRows(Run $run): \Illuminate\Support\Collection
+    /** @return Collection<int, Attachment> */
+    protected function runAttachmentRows(Run $run): Collection
     {
         $ids = array_values(array_filter((array) ($run->attachments ?? []), 'is_string'));
 
@@ -673,6 +737,13 @@ class ChatPanel extends Component
             return;
         }
 
+        // Resuming an old conversation must not fire its long-past redirect.
+        if (! $this->navigationIsFresh($run)) {
+            Run::query()->whereKey($run->id)->update(['navigate_to' => null]);
+
+            return;
+        }
+
         $url = $run->navigate_to;
 
         $claimed = Run::query()
@@ -685,9 +756,14 @@ class ChatPanel extends Component
         }
     }
 
+    /** True when the run finished recently enough that a redirect still makes sense. */
+    protected function navigationIsFresh(Run $run): bool
+    {
+        return $run->finished_at !== null && $run->finished_at->gt(now()->subMinutes(2));
+    }
+
     /**
-     * Action buttons for an assistant message, derived from its persisted
-     * PresentActions tool call and re-resolved (re-authorized) at render time.
+     * Action buttons from the message's persisted PresentActions tool call, re-resolved (re-authorized) at render time.
      *
      * @return array<int, array{label: string, url: string, external: bool}>
      */
@@ -699,7 +775,7 @@ class ChatPanel extends Component
             return [];
         }
 
-        $resolver = app(\Devletes\Sidekick\Contracts\ActionResolver::class);
+        $resolver = app(ActionResolver::class);
         $buttons = [];
 
         foreach ($message->decodedToolCalls() as $call) {
@@ -721,7 +797,12 @@ class ChatPanel extends Component
                 }
 
                 if (filled($action['url'] ?? null)) {
-                    $buttons[] = ['label' => $label, 'url' => (string) $action['url'], 'external' => true];
+                    // Model-authored: only ever http(s), never javascript: or data:.
+                    $url = (string) $action['url'];
+
+                    if (in_array(strtolower((string) parse_url($url, PHP_URL_SCHEME)), ['http', 'https'], true)) {
+                        $buttons[] = ['label' => $label, 'url' => $url, 'external' => true];
+                    }
                 } elseif (filled($action['target'] ?? null)) {
                     $url = $resolver->resolve((string) $action['target'], $action['record'] ?? null, $user);
 

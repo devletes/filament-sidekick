@@ -27,6 +27,7 @@ class Run extends Model
             'attachments' => 'array',
             'activity' => 'array',
             'usage' => 'array',
+            'denied' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];

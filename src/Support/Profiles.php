@@ -2,18 +2,7 @@
 
 namespace Devletes\Sidekick\Support;
 
-/**
- * Panel-specific assistant profiles. A profile is a named set of overrides in
- * `sidekick.profiles.{name}` whose top-level keys REPLACE the base config for
- * the duration of the request (identity, instructions, tools, actions, model,
- * attachments — anything). The active panel applies its profile via
- * SidekickPlugin::profile(); queued turns re-apply it from the profile stamped
- * on the conversation, so a chat always runs under the profile it started in.
- *
- * Registered as a singleton. The base config is snapshotted on first use and
- * every apply() starts from it — long-lived queue workers switch profiles
- * between jobs without bleed.
- */
+/** Named `sidekick.profiles.{name}` config overrides; every apply() starts from a base-config snapshot, so long-lived workers switch profiles without bleed. */
 class Profiles
 {
     protected ?array $base = null;
@@ -33,8 +22,7 @@ class Profiles
 
         config(['sidekick' => $config]);
 
-        // Unknown names fall back to the base profile — and stamp as base, so
-        // conversations never reference a profile that doesn't resolve.
+        // Unknown names fall back to base — and stamp as base, so conversations never reference a profile that doesn't resolve.
         $this->current = $overrides !== null ? $name : null;
     }
 

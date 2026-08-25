@@ -8,12 +8,7 @@ use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
 
-/**
- * Persists chat uploads onto a host-configured disk and hands back Attachment
- * rows. Validation (type, size, count) happens here so every entry path —
- * composer, confirm card — enforces the same host rules. File contents are
- * never read into the conversation; callers only ever pass metadata onward.
- */
+/** Persists chat uploads to a host-configured disk with shared validation; file contents are never read into the conversation. */
 class AttachmentStore
 {
     public function enabled(): bool
@@ -26,10 +21,14 @@ class AttachmentStore
         return config('sidekick.attachments.disk') ?: config('filesystems.default');
     }
 
-    /** @return string[] Accepted mime patterns (exact or `type/*`). */
+    /**
+     * Accepted mime patterns (exact or `type/*`); the default MUST match the shipped config or a config missing this key silently accepts every type.
+     *
+     * @return string[]
+     */
     public function accept(): array
     {
-        return array_values((array) config('sidekick.attachments.accept', []));
+        return array_values((array) config('sidekick.attachments.accept', ['image/*', 'application/pdf']));
     }
 
     /** Comma-joined accept list for the file input's `accept` attribute. */
@@ -48,20 +47,13 @@ class AttachmentStore
     {
         $this->validate($file);
 
-        // Capture EVERYTHING before storeAs(): when source and target share a
-        // disk, Livewire's TemporaryUploadedFile::storeAs MOVES the temp file,
-        // so any later read (getSize/getMimeType/guessExtension) hits a
-        // deleted path and throws. Livewire's test mode reads these from the
-        // surviving .json manifest instead, so a post-store read passes every
-        // test and only crashes in production — do not reorder.
+        // Read all file metadata BEFORE storeAs(): same-disk storeAs MOVES the temp file, and Livewire's test mode masks post-move reads that crash in production.
         $originalName = $file->getClientOriginalName() ?: 'file';
         $mime = (string) ($file->getMimeType() ?: 'application/octet-stream');
         $size = (int) $file->getSize();
         $basename = $this->safeFileName($originalName, $this->resolveExtension($file));
 
-        // A uuid FOLDER with a sanitized original basename inside: unique on
-        // disk, while anything consuming the path (e.g. a host copying the
-        // file into a media collection) sees the human filename.
+        // A uuid folder with a sanitized original basename inside: unique on disk, human filename for path consumers.
         $directory = trim((string) config('sidekick.attachments.directory', 'sidekick-attachments'), '/')
             .'/'.now()->format('Y/m')
             .'/'.Str::uuid7()->toString();
@@ -131,8 +123,7 @@ class AttachmentStore
     }
 
     /**
-     * Ownership-scoped metadata for a set of attachment ids, in id order.
-     * Unknown/foreign ids are silently dropped.
+     * Ownership-scoped metadata for a set of attachment ids, in id order; unknown/foreign ids are silently dropped.
      *
      * @return array<int, array{id: string, name: string, mime: string, size: int}>
      */
