@@ -14,6 +14,7 @@ use Devletes\Sidekick\Support\AttachmentStore;
 use Devletes\Sidekick\Support\Profiles;
 use Devletes\Sidekick\Support\SidekickContext;
 use Devletes\Sidekick\Support\ToolRegistry;
+use Filament\Facades\Filament;
 use Filament\Models\Contracts\HasName;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
@@ -76,6 +77,69 @@ class ChatPanel extends Component
         $this->forgetActionModal();
     }
 
+    /** Open a past conversation from the history dropdown. */
+    public function openConversation(string $conversationId): void
+    {
+        if (! $this->historyEnabled() || ! auth()->check()) {
+            return;
+        }
+
+        // The id arrives from the client, so ownership and profile scope are re-proven rather than trusted.
+        $found = $this->scopeToProfile(
+            Conversation::query()->forParticipant(auth()->user()),
+        )
+            ->whereKey($conversationId)
+            ->value('id');
+
+        if (! $found) {
+            return;
+        }
+
+        $this->conversationId = $found;
+        $this->draft = '';
+        $this->forgetActionModal();
+    }
+
+    /**
+     * The user's most recent conversations in this profile, newest first.
+     *
+     * @return Collection<int, Conversation>
+     */
+    public function recentConversations(): Collection
+    {
+        if (! $this->historyEnabled() || ! auth()->check()) {
+            return collect();
+        }
+
+        return $this->scopeToProfile(
+            Conversation::query()->forParticipant(auth()->user()),
+        )
+            ->latest('updated_at')
+            ->limit(max(1, (int) config('sidekick.history.limit', 10)))
+            ->get(['id', 'title', 'updated_at']);
+    }
+
+    protected function historyEnabled(): bool
+    {
+        return (bool) config('sidekick.history.enabled', false);
+    }
+
+    /**
+     * The serving tenant, stamped onto every run. Conversations already carry one when the host's
+     * SidekickContext sets it; runs carry their own so limits and insights can scope without a join, and
+     * without depending on the host having implemented that seam.
+     */
+    protected function tenantKey(): ?string
+    {
+        try {
+            $key = Filament::getTenant()?->getKey();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $key === null ? null : (string) $key;
+    }
+
     public function getListeners(): array
     {
         // Echo subscription lives in JS (sidekick.js): Livewire's native `echo-` listeners silently no-op when window.Echo boots late.
@@ -120,6 +184,7 @@ class ChatPanel extends Component
         if ($denial !== null) {
             $conversation->runs()->create([
                 'user_id' => $user->getAuthIdentifier(),
+                'tenant_id' => $this->tenantKey(),
                 'prompt' => $text,
                 'status' => Run::STATUS_FAILED,
                 'error' => Str::limit($denial, 480),
@@ -143,6 +208,7 @@ class ChatPanel extends Component
 
         $run = $conversation->runs()->create([
             'user_id' => $user->getAuthIdentifier(),
+            'tenant_id' => $this->tenantKey(),
             'prompt' => $text,
             'attachments' => $staged->isNotEmpty() ? $staged->pluck('id')->values()->all() : null,
             'status' => Run::STATUS_QUEUED,
@@ -175,6 +241,8 @@ class ChatPanel extends Component
 
         $run = $conversation->runs()->create([
             'user_id' => $lastRun->user_id,
+            // Inherited rather than re-read: a retry belongs to the same tenant as the run it repeats.
+            'tenant_id' => $lastRun->tenant_id,
             'prompt' => $lastRun->prompt,
             'attachments' => $lastRun->attachments,
             'status' => Run::STATUS_QUEUED,
@@ -249,7 +317,7 @@ class ChatPanel extends Component
             }
 
             if (count($this->{$target}) >= $store->maxFiles()) {
-                $this->uploadError = 'You can attach up to '.$store->maxFiles().' files.';
+                $this->uploadError = __('sidekick::messages.attachments.too_many', ['count' => $store->maxFiles()]);
                 rescue(fn () => $file->delete(), report: false);
 
                 continue;
@@ -262,7 +330,7 @@ class ChatPanel extends Component
             } catch (\Throwable $e) {
                 // A vanished temp file must degrade to a retry hint, never a 500 that eats the whole panel update.
                 report($e);
-                $this->uploadError = 'That upload didn\'t come through — please try again.';
+                $this->uploadError = __('sidekick::messages.attachments.failed');
             } finally {
                 // The Livewire temp copy is spent either way (same-disk stores already moved it; this covers the rest).
                 rescue(fn () => $file->delete(), report: false);
@@ -380,7 +448,7 @@ class ChatPanel extends Component
             ->where('updated_at', '<', now()->subSeconds((int) config('sidekick.stale_after', 240)))
             ->update([
                 'status' => Run::STATUS_FAILED,
-                'error' => 'The assistant took too long to respond.',
+                'error' => __('sidekick::messages.errors.stale_run'),
                 'finished_at' => now(),
             ]);
     }
@@ -464,6 +532,8 @@ class ChatPanel extends Component
             'cardAttachments' => $this->stagedRows('cardStaged'),
             'cardPayloadAttachments' => $activeAction ? $this->payloadAttachmentRows($activeAction) : collect(),
             'activeRunAttachments' => $activeRun ? $this->runAttachmentRows($activeRun) : collect(),
+            'historyEnabled' => $this->historyEnabled(),
+            'recentConversations' => $this->recentConversations(),
             'assistantName' => $assistantName = config('sidekick.assistant.name', 'Assistant'),
             'assistantDescription' => config('sidekick.assistant.description'),
             'greeting' => $this->greeting($assistantName),
@@ -493,8 +563,8 @@ class ChatPanel extends Component
         $firstName = trim(strtok(trim($name), ' ') ?: '');
 
         return $firstName === ''
-            ? "I'm {$assistantName}"
-            : "Hi {$firstName} — I'm {$assistantName}";
+            ? __('sidekick::messages.empty_state.greeting', ['assistant' => $assistantName])
+            : __('sidekick::messages.empty_state.greeting_named', ['name' => $firstName, 'assistant' => $assistantName]);
     }
 
     /** Re-open a modal confirmation the user escaped by reloading the page. */
@@ -552,16 +622,19 @@ class ChatPanel extends Component
                 'executed_at' => now(),
             ]);
 
-            $this->acknowledge($action, "Done — {$action->summary}. {$action->result}");
+            $this->acknowledge($action, __('sidekick::messages.acknowledge.done', [
+                'summary' => $action->summary,
+                'result' => $action->result,
+            ]));
         } catch (\Throwable $e) {
             report($e);
 
             $action->update([
                 'status' => PendingAction::STATUS_FAILED,
-                'result' => Str::limit($e instanceof \InvalidArgumentException ? $e->getMessage() : 'Something went wrong executing this action.', 480),
+                'result' => Str::limit($e instanceof \InvalidArgumentException ? $e->getMessage() : __('sidekick::messages.errors.action_failed'), 480),
             ]);
 
-            $this->acknowledge($action, "That didn't go through — {$action->result}");
+            $this->acknowledge($action, __('sidekick::messages.acknowledge.failed', ['reason' => $action->result]));
         } finally {
             // Either way the card leaves the screen; its upload state goes with it.
             $this->cardUploads = [];
@@ -590,7 +663,7 @@ class ChatPanel extends Component
             $this->uploadError = null;
             $this->actionModalOpen = false;
 
-            $this->acknowledge($action, "Okay, cancelled — {$action->summary}. Nothing was submitted.");
+            $this->acknowledge($action, __('sidekick::messages.acknowledge.cancelled', ['summary' => $action->summary]));
 
             $this->dispatch('sidekick-jump-to-end');
             $this->dispatch('sidekick-focus-composer');
@@ -616,7 +689,7 @@ class ChatPanel extends Component
         }
 
         if ($action->requiresUpload() && empty($payload['attachment_ids'])) {
-            $this->uploadError = 'Attach the required file before confirming.';
+            $this->uploadError = __('sidekick::messages.attachments.missing');
 
             return null;
         }
@@ -825,7 +898,8 @@ class ChatPanel extends Component
         foreach ($activity as $entry) {
             if (($entry['type'] ?? null) === 'call') {
                 $entries[$entry['name']] = [
-                    'label' => $registry->labelFor($entry['name']) ?? 'Using '.$entry['name'],
+                    // Names are already unwrapped when recorded, so a plain lookup covers both modes.
+                    'label' => $registry->labelFor($entry['name']) ?? __('sidekick::messages.activity.using', ['tool' => $entry['name']]),
                     'done' => false,
                 ];
             } elseif (($entry['type'] ?? null) === 'result' && isset($entries[$entry['name']])) {

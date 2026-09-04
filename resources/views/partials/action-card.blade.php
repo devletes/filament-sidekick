@@ -13,9 +13,9 @@
     {{-- One "Attachments" set: files the proposal already references (from chat) plus files added here; both removable. --}}
     <div class="sidekick-card-upload">
         <p class="sidekick-card-upload-label">
-            Attachments
+            {{ __('sidekick::messages.attachments.heading') }}
             @if ($activeAction->requiresUpload() && $cardAttachments->isEmpty())
-                <span class="sidekick-upload-required">(required)</span>
+                <span class="sidekick-upload-required">{{ __('sidekick::messages.attachments.required') }}</span>
             @endif
         </p>
 
@@ -28,7 +28,7 @@
                         <span class="sidekick-chip-size">{{ $attachment->humanSize() }}</span>
                         <x-slot
                             name="deleteButton"
-                            :label="'Remove '.$attachment->name"
+                            :label="__('sidekick::messages.composer.remove', ['name' => $attachment->name])"
                             wire:click="removeProposalAttachment('{{ $activeAction->id }}', '{{ $attachment->id }}')"
                         ></x-slot>
                     </x-filament::badge>
@@ -40,7 +40,7 @@
                         <span class="sidekick-chip-size">{{ $attachment->humanSize() }}</span>
                         <x-slot
                             name="deleteButton"
-                            :label="'Remove '.$attachment->name"
+                            :label="__('sidekick::messages.composer.remove', ['name' => $attachment->name])"
                             wire:click="removeCardAttachment('{{ $attachment->id }}')"
                         ></x-slot>
                     </x-filament::badge>
@@ -51,7 +51,7 @@
         @if ($activeAction->acceptsUpload() && $attachmentsEnabled)
             {{-- The transparent input covers the whole field — clicking anywhere opens the file dialog. --}}
             <label class="sidekick-upload-field">
-                <span>Browse to select your file</span>
+                <span>{{ __('sidekick::messages.attachments.browse') }}</span>
                 <x-filament::loading-indicator wire:loading wire:target="cardUploads" class="sidekick-upload-spinner" />
                 <input
                     type="file"
@@ -73,14 +73,14 @@
         size="sm"
         wire:click="cancelAction('{{ $activeAction->id }}')"
         wire:loading.attr="disabled"
-    >Cancel</x-filament::button>
+    >{{ __('sidekick::messages.card.cancel') }}</x-filament::button>
     <x-filament::button
         color="primary"
         size="sm"
         wire:click="confirmAction('{{ $activeAction->id }}')"
         wire:loading.attr="disabled"
         :disabled="$activeAction->requiresUpload() && $cardAttachments->isEmpty()"
-    >Confirm</x-filament::button>
+    >{{ __('sidekick::messages.card.confirm') }}</x-filament::button>
 </div>
 
-<p class="sidekick-action-card-note">Nothing is submitted until you confirm.</p>
+<p class="sidekick-action-card-note">{{ __('sidekick::messages.card.note') }}</p>

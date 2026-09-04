@@ -39,4 +39,10 @@ abstract class SidekickAction implements ProposableAction
     {
         return ['*'];
     }
+
+    /** Name the resources and models this action writes to, and deleting one becomes a reported problem instead of a surprise. */
+    public function dependsOn(): array
+    {
+        return [];
+    }
 }

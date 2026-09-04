@@ -10,6 +10,7 @@ use Devletes\Sidekick\Models\Run;
 use Devletes\Sidekick\Support\PanelContext;
 use Devletes\Sidekick\Support\Profiles;
 use Devletes\Sidekick\Support\RunContext;
+use Devletes\Sidekick\Support\ToolRegistry;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -117,6 +118,8 @@ class RunChatTurn implements ShouldQueue
                 'partial_content' => null,
                 'activity' => $this->activity,
                 'usage' => $this->usage,
+                // Denormalised so limits and insights can sum in SQL rather than decoding every row's JSON.
+                'tokens' => ($this->usage['prompt_tokens'] ?? 0) + ($this->usage['completion_tokens'] ?? 0),
                 'navigate_to' => $context->navigateTo,
                 'finished_at' => now(),
             ]);
@@ -172,15 +175,17 @@ class RunChatTurn implements ShouldQueue
                 }
 
                 $this->activity[] = [
+                    // In catalog mode every call arrives as RunTool; record what it actually ran so the
+                    // panel shows "Checking your leave balance" rather than "Using RunTool".
                     'type' => 'call',
-                    'name' => $event->toolCall->name,
+                    'name' => ToolRegistry::ranTool($event->toolCall->name, $event->toolCall->arguments),
                     'at' => now()->toIso8601String(),
                 ];
                 $this->flush($run, force: true);
             } elseif ($event instanceof ToolResult) {
                 $this->activity[] = [
                     'type' => 'result',
-                    'name' => $event->toolResult->name,
+                    'name' => ToolRegistry::ranTool($event->toolResult->name, $event->toolResult->arguments),
                     'successful' => $event->successful,
                     'at' => now()->toIso8601String(),
                 ];

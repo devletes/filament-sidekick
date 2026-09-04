@@ -26,4 +26,12 @@ interface ChatTool extends Tool
      * @return array<int, string>
      */
     public function panels(): array;
+
+    /**
+     * Classes this tool cannot work without — the resource it queries, the model it reads, a service it calls.
+     * Delete one and the tool is withheld rather than fataling mid-turn, and `sidekick:check` names the file.
+     *
+     * @return array<int, class-string>
+     */
+    public function dependsOn(): array;
 }

@@ -45,7 +45,9 @@ class AdminPanelProvider extends PanelProvider
                 FilamentInfoWidget::class,
             ])
             ->plugins([
-                SidekickPlugin::make(),
+                SidekickPlugin::make()
+                    ->enableHistory()
+                    ->enableInsights(),
             ])
             ->middleware([
                 EncryptCookies::class,

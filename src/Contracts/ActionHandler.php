@@ -18,4 +18,12 @@ interface ActionHandler
 
     /** Perform the action and return a short outcome line; resolve any payload `attachment_ids` via the Attachment model, re-proving ownership. */
     public function execute(array $payload, Authenticatable $user): string;
+
+    /**
+     * Classes this action cannot work without. Delete one and the action stops being offered — and stops being
+     * confirmable — rather than failing at execute() time; `sidekick:check` names the file. See ChatTool::dependsOn().
+     *
+     * @return array<int, class-string>
+     */
+    public function dependsOn(): array;
 }

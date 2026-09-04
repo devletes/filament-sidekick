@@ -37,7 +37,7 @@ class InstallCommand extends Command
             'Optional: enable broadcasting (SIDEKICK_BROADCASTING=true) for instant updates over Reverb/Pusher',
         ]);
 
-        $this->components->info('Tools and actions in app/Sidekick/{Tools,Actions} are discovered automatically — no registration needed.');
+        $this->components->info('Tools and actions anywhere under app/Sidekick are discovered automatically — no registration needed.');
 
         return self::SUCCESS;
     }

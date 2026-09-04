@@ -5,15 +5,24 @@
 [![License](https://img.shields.io/packagist/l/devletes/filament-sidekick.svg?style=flat-square)](https://packagist.org/packages/devletes/filament-sidekick)
 [![GitHub Stars](https://img.shields.io/github/stars/devletes/filament-sidekick?style=flat-square)](https://github.com/devletes/filament-sidekick/stargazers)
 
-A push-aside AI assistant panel for Filament 5 panels.
+An AI assistant panel for Filament 5 **that cannot write to your database on its own.**
 
-- Pushes the page aside instead of covering it — content reflows, nothing is hidden
-- Turns run on the queue and stream back, with live tool activity
-- Read tools and confirmable write actions are one class each, auto-discovered
-- The model can only *propose* writes; execution needs the user's Confirm click
-- Per-panel tools, per-panel assistants, multi-tenant safe
-- Attachments whose contents never reach the LLM
-- Filament components throughout, plus a `--sidekick-*` CSS theming surface
+The model may only ever *propose* a change. It arrives as a confirmation card showing exactly what will happen, and the write runs on the user's Confirm click, under their session, claimed atomically so two tabs cannot fire it twice. Answered cards leave a system-verified outcome in the timeline, and that outcome is the only thing the model is told about what happened — so it can never claim success on its own.
+
+That is the whole design, not a setting:
+
+- **Reads and writes are different classes.** A `ChatTool` answers; a `SidekickAction` proposes. There is no code path from the model to `execute()`
+- **Generated code is inert until you finish it.** Scaffolded actions throw rather than guess, and every file carries an `authorize()` TODO
+- **Unauthorized tools are never offered**, so a tool the user cannot use is not in the prompt to be talked into
+- **Multi-tenant by construction** — panel, tenant and guard are captured at dispatch and restored in the worker; a turn that cannot restore its tenant refuses to run rather than running unscoped
+- **Attachment contents never reach the model** — only name, type and size
+
+<table><tr>
+<td width="50%"><img src="docs/images/confirm_card_light.png" alt="A confirmation card awaiting the user (light)"></td>
+<td width="50%"><img src="docs/images/confirm_card_dark.png" alt="A confirmation card awaiting the user (dark)"></td>
+</tr></table>
+
+Around that: a panel that pushes the page aside instead of covering it, queued turns that survive navigation, per-panel assistants, usage limits with a tenant→user hierarchy, an operator insights page, translations, and a `--sidekick-*` CSS theming surface.
 
 <table><tr>
 <td width="50%"><img src="docs/images/layout_light.png" alt="The panel open beside a leave requests table (light)"></td>
@@ -22,9 +31,9 @@ A push-aside AI assistant panel for Filament 5 panels.
 
 ## Requirements
 
-- PHP `^8.2`
-- Filament `^5.0`
-- `laravel/ai` `^0.7` with a configured provider
+- PHP `^8.3` — every `laravel/ai` release we support requires it
+- Filament `^5.0` on Laravel 12 or 13
+- `laravel/ai` `^0.7` through `^0.11`, with a configured provider
 - A queue worker — turns are queued jobs
 
 ## Installation
@@ -94,7 +103,7 @@ class LeaveBalances extends ChatToolBase
 }
 ```
 
-Classes in `app/Sidekick/Tools` are auto-discovered — there is no registration step. The panel shows each tool's `label()` while it runs, then renders the reply as markdown.
+Classes under `app/Sidekick` are auto-discovered — there is no registration step. The panel shows each tool's `label()` while it runs, then renders the reply as markdown.
 
 <table><tr>
 <td width="50%"><img src="docs/images/panel_light.png" alt="Tool activity and a markdown reply (light)"></td>
@@ -109,6 +118,7 @@ Optional overrides:
 | `label()` | Status line in the panel. Defaults to the class name |
 | `instructions()` | System-prompt guidance added while this tool is offered. Hard-coded text only — never interpolate user or record data |
 | `panels()` | Panel ids that offer this tool. Defaults to `['*']` |
+| `dependsOn()` | Classes this tool cannot work without. Delete one and the tool is withheld instead of fataling; `sidekick:check` reports it |
 
 ## Actions (writes)
 
@@ -173,7 +183,7 @@ Answered cards leave a system-verified outcome in the timeline. Those outcomes a
 <td width="50%"><img src="docs/images/action_outcome_dark.png" alt="A confirmed action's outcome (dark)"></td>
 </tr></table>
 
-Overridable conventions: `type()` (defaults to the snake_cased class name), plus `authorize()`, `label()`, `instructions()`, and `panels()` as above.
+Overridable conventions: `type()` (defaults to the snake_cased class name), plus `authorize()`, `label()`, `instructions()`, `panels()`, and `dependsOn()` as above. An action whose dependencies are missing stops being proposable *and* confirmable.
 
 ### Inline or modal
 
@@ -204,9 +214,76 @@ The modal can't be clicked, escaped, or closed away — answering it is the only
 
 Three composable sources, deduplicated:
 
-1. **Discovery** *(default)* — any class in `app/Sidekick/Tools` or `app/Sidekick/Actions`. Paths and kill switch under `sidekick.discover`.
+1. **Discovery** *(default)* — any class anywhere under `app/Sidekick`. Roots and kill switch under `sidekick.discover`.
 2. **Config** — class arrays in `sidekick.tools` / `sidekick.actions`. Also how a profile gets its own tool set.
 3. **Runtime** — `Sidekick::tools([...])` from any service provider, for packages contributing tools. Works in web requests and queue workers alike.
+
+### Layout is yours
+
+The discovery root is scanned recursively and classes are matched by contract, not by folder — so group by kind, by domain, or not at all:
+
+```
+app/Sidekick/
+├── Leave/
+│   ├── LeaveBalances.php      # ChatTool
+│   └── RequestTimeOff.php     # SidekickAction
+├── Payroll/
+│   └── Payslips.php
+└── ResourceResolver.php       # neither — ignored
+```
+
+Anything in the tree that isn't a `ChatTool` or `ActionHandler` is skipped, so support classes and the resolver can live alongside. `sidekick.discover.paths` takes a path or an array of them; point roots at trees that hold only Sidekick classes, since discovery autoloads what it finds.
+
+### Knowing what breaks
+
+A tool outlives the resource it queries. `dependsOn()` names what a class cannot work without:
+
+```php
+public function dependsOn(): array
+{
+    return [EmployeeResource::class, Employee::class];
+}
+```
+
+Delete one of those and the tool is **withheld** from the assistant — chat keeps working, minus that capability — instead of fataling mid-turn. A warning is logged once per class.
+
+```bash
+php artisan sidekick:check
+```
+
+reports every tool and action with a missing dependency and exits non-zero, so CI catches it. It checks declared `dependsOn()` entries *and* each file's own imports, so a deleted resource is reported even in tools that never declared anything.
+
+Before deleting something, ask what depends on it:
+
+```bash
+php artisan sidekick:check --uses="App\Filament\Resources\EmployeeResource"
+```
+
+## Tool catalog
+
+By default every authorized tool's definition rides along in every request. Past a few dozen that costs real tokens on every turn and blunts the model's choice. Catalog mode offers two tools instead — `ListTools` (names, descriptions, parameters) and `RunTool` (dispatch by name) — so the prompt stays flat whether the assistant has 6 tools or 60:
+
+```php
+// config/sidekick.php
+'tool_catalog' => [
+    'enabled' => false,
+    'above' => 30,
+],
+```
+
+`above` flips it automatically once a user's **authorized** set passes that many, which is usually better than a flat on/off — the right mode depends on how much any one person can actually see, not how much is registered.
+
+Nothing changes in your tools. The catalog is built from the same `ChatTool` interface, so `description()`, `schema()`, `authorize()` and `panels()` all still apply, and confirmable actions are catalogued under their `Propose{Type}` name like anything else. A write reached through `RunTool` still only ever produces a card.
+
+What does change:
+
+- **`description()` becomes the discovery surface.** The model's first pass sees names and descriptions only, so a vague description means a tool never gets fetched. Descriptions stop being documentation and start being routing.
+- **You trade a round trip for a flatter prompt**, and lose provider-side schema validation — arguments arrive as JSON that Sidekick parses and hands back correctable errors for. Below ~15 tools that trade is a loss.
+- **Try scoping first.** `panels()` and profiles often keep any one assistant small enough that you never need this.
+
+`RunTool` resolves names against the caller's own authorized set, so naming a tool the user cannot use fails the same way an unknown name does. `Navigate` and `PresentActions` stay direct — their calls are read back from storage afterwards, which only works while they are recorded under their own name. Mark your own tool `Contracts\AlwaysOffered` to keep it direct too.
+
+Per-tool `instructions()` stay in the system prompt in both modes: guidance has to reach the model before it chooses, not after it fetches the catalog.
 
 ## Navigation
 
@@ -229,6 +306,18 @@ Generates a `Search{Models}` tool per Filament resource plus one `ResourceResolv
 
 Output is a starting point, not finished code — every file carries TODOs, notably `authorize()`. Re-runs never overwrite existing files. Scope with `sidekick.scaffold.only` and `sidekick.scaffold.ignore`.
 
+## Context size
+
+Two bounds keep prompts flat as a conversation grows. `sidekick.history_limit` caps how many past messages are rehydrated (10), and `lean_history` strips old tool calls and results — the model re-calls tools for fresh data instead of re-reading stale answers.
+
+A row cap says nothing about size, though: ten pasted stack traces cost far more than ten "thanks". Set a token budget to bound that directly:
+
+```php
+'history_token_budget' => 2000,
+```
+
+Messages are then dropped oldest-first until the estimate fits, and the newest is always kept so a single huge turn shrinks history rather than erasing it. The estimate is byte-based (`history_bytes_per_token`, default 4) because no PHP tokeniser matches every provider — budget with headroom rather than to the exact context window.
+
 ## Streaming
 
 The panel shows each tool as it is called and reveals the reply as it streams. Turns survive full page navigations — progress lives on the run row, not in component state.
@@ -239,6 +328,28 @@ The panel shows each tool as it is called and reveals the reply as it streams. T
 </tr></table>
 
 Polling (`2s`, only while a turn is active) is the default and needs nothing installed. Set `SIDEKICK_BROADCASTING=true` to push updates over Reverb/Pusher instead; polling stays on as a safety net at `polling.while_broadcasting` (`10s`), and a broadcast failure never fails a turn.
+
+## Conversation history
+
+The panel opens on a fresh chat by design — a panel assistant is usually a place to ask one thing, not an archive. Turn on a history dropdown beside **New conversation** when yours is used daily:
+
+```php
+SidekickPlugin::make()->enableHistory()
+```
+
+It lists the ten most recent conversations (`sidekick.history.limit`), newest first. Ownership and profile scope are re-proven on every open, so a tampered id cannot reach another user's chat, and each profile only ever lists its own. Set `sidekick.history.enabled` to turn it on everywhere, and `->enableHistory(false)` to keep one panel out.
+
+## Translations
+
+Every user-facing string goes through `sidekick::messages.*`. English ships with the package; publish it to translate or reword:
+
+```bash
+php artisan vendor:publish --tag=sidekick-translations
+```
+
+That writes `lang/vendor/sidekick/en/messages.php`. Copy it to `lang/vendor/sidekick/{locale}/messages.php` for each locale you support — anything you leave out falls back to the packaged English, so a partial translation is safe to ship.
+
+The assistant's own replies are not translated files: the system prompt tells the model to answer in the language the user writes in, so replies follow the conversation rather than the app locale.
 
 ## Panels & multi-tenancy
 
@@ -264,9 +375,53 @@ The model only ever sees metadata — name, mime, size, and an `attachment_id` �
 
 Storage is temporary: schedule `sidekick:prune-attachments` daily and it deletes every upload older than `prune_after_hours`. A confirmed action should copy what it needs into your own storage.
 
+## Insights
+
+An operator page — turns, tokens, failure rate, a 30-day chart and recent activity — off until a panel asks for it:
+
+```php
+SidekickPlugin::make()->enableInsights(fn ($user) => $user->is_admin)
+```
+
+Pass a closure to say who may open it. Without one it is visible to anyone who can reach the panel, which is rarely right for a page that totals other people's usage.
+
+**It is tenant-scoped, and fails closed.** On a tenant panel it shows that tenant's runs and nothing else. If tenancy is on but no tenant resolved, it shows nothing rather than everything. Prompts are hidden by default — they are the person's own words — and `sidekick.insights.show_prompts` opts back in.
+
 ## Usage limits
 
-Sidekick meters every turn onto `sidekick_runs.usage` but enforces nothing. Implement `Contracts\UsageLimiter` and point at it:
+Sidekick meters every turn and ships a limiter that enforces allowances at two levels, because that is how a multi-tenant product actually sells: the platform caps each tenant, and the tenant divides its cap among its people.
+
+```php
+// config/sidekick.php
+'limits' => [
+    'enabled' => true,
+    'tenant' => ['requests_per_day' => 2000, 'tokens_per_month' => 5_000_000],
+    'user' => ['requests_per_day' => 50],
+],
+```
+
+Both are enforced and whichever runs out first is the one the person is told about, with the tenant reported before the user — "your organisation is out" is more useful than "you are out" when both are true. Turns refused by the limiter never count against the allowance, so being refused once cannot help refuse you again.
+
+Once tenants need their own numbers, bind `Contracts\LimitProvider` and read them from your tables:
+
+```php
+class PlanLimits implements LimitProvider
+{
+    public function forTenant(int|string|null $tenant): Limits
+    {
+        return Limits::fromArray(Plan::for($tenant)->limits);
+    }
+
+    public function forUser(Authenticatable $user, int|string|null $tenant): Limits
+    {
+        return Limits::fromArray($user->assistant_limits);
+    }
+}
+```
+
+A user allowance is always clamped to its tenant's, so a tenant admin can be **stricter** than their plan but can never hand out more of it than the platform sold them. Fields are clamped one by one, and anything the tenant left unset inherits the platform's figure rather than staying unlimited.
+
+For something the two levels cannot express, replace the limiter outright:
 
 ```php
 class TenantPlanLimiter implements UsageLimiter
@@ -338,7 +493,9 @@ SidekickPlugin::make()->icon(view('icons.my-logo'))
 | `config/sidekick.php` | Agent class, assistant identity, instructions, model, queue, broadcasting, geometry |
 | `Contracts\ChatTool` / `ProposableAction` | Read tools and confirmable writes — extend the base classes instead |
 | `Contracts\ActionResolver` | Named navigation targets → authorized URLs |
-| `Contracts\UsageLimiter` | Per-user or per-tenant limits |
+| `Contracts\LimitProvider` | Where allowances come from — a tenant's plan, a user's settings |
+| `Contracts\UsageLimiter` | Replace the shipped limiter outright |
+| `Contracts\AlwaysOffered` | Keep a tool out of the catalog and directly in the prompt |
 | `Support\SidekickContext` | Stamp extra columns onto conversations and scope conversation queries |
 | `sidekick.jobs.run` | Subclass `RunChatTurn` for app concerns like metering |
 

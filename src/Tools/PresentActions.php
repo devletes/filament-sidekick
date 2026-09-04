@@ -3,12 +3,13 @@
 namespace Devletes\Sidekick\Tools;
 
 use Devletes\Sidekick\Contracts\ActionResolver;
+use Devletes\Sidekick\Contracts\AlwaysOffered;
 use Devletes\Sidekick\Support\ChatToolBase;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Tools\Request;
 
 /** Built-in: buttons under the reply, derived by ChatPanel::messageActions from the persisted tool call — the class name "PresentActions" is the wire contract. */
-class PresentActions extends ChatToolBase
+class PresentActions extends ChatToolBase implements AlwaysOffered
 {
     public function __construct(protected ActionResolver $resolver) {}
 

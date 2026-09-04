@@ -3,6 +3,7 @@
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Jobs\RunChatTurn;
 use Devletes\Sidekick\Models\Run;
+use Devletes\Sidekick\Support\MeteredUsage;
 use Devletes\Sidekick\Support\UnlimitedUsage;
 use Devletes\Sidekick\Tests\Fixtures\FakeUser;
 use Devletes\Sidekick\Tests\Fixtures\FlagLimiter;
@@ -15,11 +16,17 @@ beforeEach(function () {
     FlagLimiter::$denial = null;
 });
 
-it('defaults to no limits', function () {
+it('defaults to the metered limiter, which allows everything until limits are enabled', function () {
     $limiter = app(UsageLimiter::class);
 
-    expect($limiter)->toBeInstanceOf(UnlimitedUsage::class)
+    expect($limiter)->toBeInstanceOf(MeteredUsage::class)
         ->and($limiter->check(FakeUser::make(), null))->toBeNull();
+});
+
+it('still resolves UnlimitedUsage for hosts that ask for it by name', function () {
+    config()->set('sidekick.usage_limiter', UnlimitedUsage::class);
+
+    expect(app(UsageLimiter::class))->toBeInstanceOf(UnlimitedUsage::class);
 });
 
 it('resolves the limiter configured under sidekick.usage_limiter', function () {

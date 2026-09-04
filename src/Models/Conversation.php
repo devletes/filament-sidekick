@@ -10,6 +10,15 @@ use Laravel\Ai\Models\Conversation as BaseConversation;
 
 class Conversation extends BaseConversation
 {
+    /**
+     * Declared here rather than inherited. laravel/ai marks its own models with a #[WithoutIncrementing]
+     * attribute that only exists in newer framework releases; where it is missing the attribute is ignored,
+     * the model quietly auto-increments, and the uuid we assign is thrown away on save.
+     */
+    public $incrementing = false;
+
+    protected $keyType = 'string';
+
     public function runs(): HasMany
     {
         return $this->hasMany(Run::class, 'conversation_id');

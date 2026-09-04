@@ -27,6 +27,15 @@ class {{ class }} extends SidekickAction
     }
 
     /**
+     * What this action cannot work without. Delete {{ resourceBasename }} and Sidekick stops offering — and
+     * stops confirming — this action; `php artisan sidekick:check` names the file so you can fix or remove it.
+     */
+    public function dependsOn(): array
+    {
+        return [{{ resourceBasename }}::class];
+    }
+
+    /**
      * TODO: mirror the fields of {{ resourceBasename }}::form().
      *
      * @return array<string, \Illuminate\JsonSchema\Types\Type>

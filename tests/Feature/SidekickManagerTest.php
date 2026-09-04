@@ -4,19 +4,21 @@ use Devletes\Sidekick\Contracts\ActionResolver;
 use Devletes\Sidekick\Facades\Sidekick;
 use Devletes\Sidekick\Support\SidekickManager;
 use Devletes\Sidekick\Support\ToolRegistry;
+use Devletes\Sidekick\Tests\Fixtures\Actions\BrokenAction;
 use Devletes\Sidekick\Tests\Fixtures\Actions\CreateNote;
 use Devletes\Sidekick\Tests\Fixtures\FakeUser;
 use Devletes\Sidekick\Tests\Fixtures\FixedResolver;
+use Devletes\Sidekick\Tests\Fixtures\Tools\BrokenTool;
 use Devletes\Sidekick\Tests\Fixtures\Tools\EchoTool;
+use Devletes\Sidekick\Tests\Fixtures\Tools\Nested\NestedTool;
 use Devletes\Sidekick\Tests\Fixtures\Tools\NotATool;
 use Devletes\Sidekick\Tools\ActionProposalTool;
 use Devletes\Sidekick\Tools\Navigate;
 use Devletes\Sidekick\Tools\PresentActions;
 use Laravel\Ai\Tools\ToolNameResolver;
 
-it('discovers tools and actions from the configured paths, skipping non-contract classes', function () {
-    config()->set('sidekick.discover.tools', __DIR__.'/../Fixtures/Tools');
-    config()->set('sidekick.discover.actions', __DIR__.'/../Fixtures/Actions');
+it('discovers tools and actions from one root, skipping non-contract classes', function () {
+    config()->set('sidekick.discover.paths', __DIR__.'/../Fixtures');
 
     $manager = app(SidekickManager::class);
 
@@ -25,11 +27,54 @@ it('discovers tools and actions from the configured paths, skipping non-contract
         ->and($manager->actionClasses())->toContain(CreateNote::class);
 });
 
+it('discovers tools nested below the root, so the folder layout is the developer\'s choice', function () {
+    config()->set('sidekick.discover.paths', __DIR__.'/../Fixtures');
+
+    expect(app(SidekickManager::class)->toolClasses())->toContain(NestedTool::class);
+});
+
+it('accepts several roots and deduplicates overlapping ones', function () {
+    config()->set('sidekick.discover.paths', [
+        __DIR__.'/../Fixtures/Tools',
+        __DIR__.'/../Fixtures/Actions',
+        __DIR__.'/../Fixtures/Tools/',
+    ]);
+
+    $manager = app(SidekickManager::class);
+
+    expect($manager->toolClasses())->toContain(EchoTool::class, NestedTool::class)
+        ->and(array_count_values($manager->toolClasses())[EchoTool::class])->toBe(1)
+        ->and($manager->actionClasses())->toContain(CreateNote::class);
+});
+
 it('honours the discovery kill switch', function () {
     config()->set('sidekick.discover.enabled', false);
-    config()->set('sidekick.discover.tools', __DIR__.'/../Fixtures/Tools');
+    config()->set('sidekick.discover.paths', __DIR__.'/../Fixtures');
 
     expect(app(SidekickManager::class)->toolClasses())->toBe([]);
+});
+
+it('withholds a tool whose declared dependencies no longer exist', function () {
+    config()->set('sidekick.tools', [EchoTool::class, BrokenTool::class]);
+
+    $manager = app(SidekickManager::class);
+
+    // Still registered — the class list is what sidekick:check reports on.
+    expect($manager->toolClasses())->toContain(BrokenTool::class)
+        // But never offered to the model, so a deleted resource cannot fatal a turn.
+        ->and($manager->toolInstances())->each->not->toBeInstanceOf(BrokenTool::class);
+});
+
+it('stops offering and confirming an action whose dependencies no longer exist', function () {
+    config()->set('sidekick.actions', [BrokenAction::class]);
+
+    expect(app(SidekickManager::class)->actionInstances())->toBe([])
+        ->and(Sidekick::actionHandler('broken_action'))->toBeNull();
+});
+
+it('reports exactly which declared dependencies are missing', function () {
+    expect(SidekickManager::missingDependencies(new BrokenTool))->toBe([BrokenTool::MISSING])
+        ->and(SidekickManager::missingDependencies(new EchoTool))->toBe([]);
 });
 
 it('merges config tools with runtime registrations, deduplicated', function () {

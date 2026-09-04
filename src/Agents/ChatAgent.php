@@ -67,7 +67,7 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
 
     public function tools(): iterable
     {
-        return app(ToolRegistry::class)->authorizedFor($this->conversationParticipant());
+        return app(ToolRegistry::class)->offeredTo($this->conversationParticipant());
     }
 
     public function providerOptions(Lab|string $provider): array

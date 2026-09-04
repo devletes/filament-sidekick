@@ -3,13 +3,14 @@
 namespace Devletes\Sidekick\Tools;
 
 use Devletes\Sidekick\Contracts\ActionResolver;
+use Devletes\Sidekick\Contracts\AlwaysOffered;
 use Devletes\Sidekick\Support\ChatToolBase;
 use Devletes\Sidekick\Support\RunContext;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Tools\Request;
 
 /** Built-in: sends the browser to a named in-app destination when the turn completes; the panel consumes the stored URL exactly once. */
-class Navigate extends ChatToolBase
+class Navigate extends ChatToolBase implements AlwaysOffered
 {
     public function __construct(protected ActionResolver $resolver) {}
 

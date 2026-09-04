@@ -27,6 +27,7 @@ return [
         'send' => 'heroicon-m-arrow-up',
         'remove' => 'heroicon-m-x-mark',
         'tool_done' => 'heroicon-m-check',
+        'history' => 'heroicon-m-clock',
     ],
 
     // Appended verbatim to the agent's system instructions when set.
@@ -41,6 +42,20 @@ return [
     // null → no cap: the entire conversation is rehydrated every turn.
     'history_limit' => 10,
 
+    // Optional ceiling on the SIZE of that history, in approximate tokens.
+    // A row cap says nothing about prompt size — ten pasted stack traces cost
+    // far more than ten "thanks" — so set this to bound spend predictably.
+    // Rows are dropped oldest-first until the estimate fits; the newest
+    // message is always kept. null → rows are the only limit.
+    'history_token_budget' => null,
+
+    // Bytes per token for that estimate. No PHP tokeniser matches every
+    // provider, so this is deliberately approximate — budget with headroom
+    // rather than to the exact context window. 4 suits Latin scripts; CJK
+    // lands nearer 3 bytes (~1 token) per character and is already counted
+    // by byte length.
+    'history_bytes_per_token' => 4,
+
     // Strip past tool calls/results from context — the model re-calls tools
     // for fresh data; keeps prompt tokens flat as conversations grow.
     'lean_history' => true,
@@ -48,26 +63,73 @@ return [
     // Messages rendered in the panel (display only, not model context).
     'display_limit' => 60,
 
+    // Operator insights page: turns, tokens, failures and recent activity,
+    // scoped to the panel's tenant. Off by default. Turn it on per panel with
+    // SidekickPlugin::make()->enableInsights(), ideally passing a closure that
+    // says who may open it — it totals other people's usage.
+    'insights' => [
+        'enabled' => false,
+        'slug' => 'sidekick-insights',
+        'icon' => 'heroicon-o-chart-bar',
+
+        // Prompts are the person's own words; an operator dashboard is not
+        // automatically the right place to read them back.
+        'show_prompts' => false,
+    ],
+
+    // Past conversations, reachable from a dropdown next to New conversation.
+    // Off by default: a panel assistant is usually a place to ask one thing,
+    // not an archive. Turn it on per panel with SidekickPlugin::make()
+    // ->enableHistory(), or globally here.
+    'history' => [
+        'enabled' => false,
+        'limit' => 10,
+    ],
+
     'max_prompt_length' => 4000,
 
     // Chat tools (class names implementing Contracts\ChatTool). Usually
-    // unnecessary: classes in app/Sidekick/Tools are discovered automatically,
+    // unnecessary: classes under app/Sidekick are discovered automatically,
     // and packages can register via the Sidekick facade. List classes here to
     // add ones living elsewhere — or to give a profile its own tool set.
     'tools' => [],
 
     // Confirmable write actions (class names implementing
     // Contracts\ActionHandler — extend Support\SidekickAction). Same deal:
-    // app/Sidekick/Actions is discovered automatically.
+    // app/Sidekick is discovered automatically.
     'actions' => [],
 
-    // Zero-registration discovery. Every non-abstract class in these
-    // directories implementing the right contract joins the assistant.
-    // null paths → app/Sidekick/Tools and app/Sidekick/Actions.
+    // Zero-registration discovery. Roots are scanned RECURSIVELY and every
+    // non-abstract class implementing ChatTool or ActionHandler joins the
+    // assistant — so app/Sidekick/Tools/… and app/Sidekick/Leave/… work
+    // equally well, and anything else in the tree (support classes, the
+    // resolver) is simply ignored. null → app/Sidekick.
+    //
+    // A string or an array of paths. Point roots at trees that hold only
+    // Sidekick classes: discovery autoloads what it finds, so aiming one at a
+    // shared tree like app/Filament costs boot time for nothing.
     'discover' => [
         'enabled' => true,
-        'tools' => null,
-        'actions' => null,
+        'paths' => null,
+    ],
+
+    // Tool catalog. Normally every authorized tool's definition rides along in
+    // every request; past a few dozen that costs real tokens and blunts the
+    // model's choice. Turn this on and the model is offered two tools instead:
+    // ListTools (names, descriptions and parameters) and RunTool (dispatch by
+    // name). The prompt then stays flat whether you have 6 tools or 60.
+    //
+    // It buys that with an extra round trip per turn and the loss of
+    // provider-side schema validation, so it is a poor trade for a small
+    // assistant. Prefer scoping with panels() and profiles first; reach for
+    // this when one assistant genuinely needs everything.
+    //
+    // `above` flips it automatically once a user's authorized set passes that
+    // many tools, which is usually better than a flat yes/no — the right mode
+    // depends on how much any one user can actually see.
+    'tool_catalog' => [
+        'enabled' => false,
+        'above' => null,
     ],
 
     // Built-in tools. Navigate + PresentActions wake automatically once an
@@ -96,11 +158,41 @@ return [
         'ignore' => [],
     ],
 
-    // Usage limits. Sidekick records token usage per turn (sidekick_runs.usage)
-    // but enforces nothing by default. Point this at a Contracts\UsageLimiter
-    // implementation to gate turns — per user, per tenant, requests or tokens,
-    // backed by config or your own CRUD. A container binding wins over this.
+    // Usage limits. The shipped limiter (Support\MeteredUsage) counts turns and
+    // tokens off the runs table and enforces the allowances below; it does
+    // nothing at all while `limits.enabled` is false. Point this at your own
+    // Contracts\UsageLimiter to replace it outright. A container binding wins.
     'usage_limiter' => null,
+
+    'limits' => [
+        'enabled' => false,
+
+        // The platform's cap on a whole tenant — or on the whole install when
+        // the panel has no tenancy. null anywhere means unlimited for that
+        // window, so a partial set constrains only what it names.
+        'tenant' => [
+            'requests_per_day' => null,
+            'requests_per_month' => null,
+            'tokens_per_day' => null,
+            'tokens_per_month' => null,
+        ],
+
+        // The cap on one person. Always clamped to the tenant's above, so a
+        // tenant admin can be stricter than their plan but can never hand out
+        // more of it than the platform sold them.
+        'user' => [
+            'requests_per_day' => null,
+            'requests_per_month' => null,
+            'tokens_per_day' => null,
+            'tokens_per_month' => null,
+        ],
+
+        // Contracts\LimitProvider — where those numbers come from. The default
+        // reads the two arrays above. Point this at your own class to read a
+        // tenant's plan and its per-user settings from your tables; the
+        // clamping still applies, so you cannot accidentally oversell.
+        'provider' => null,
+    ],
 
     // Minutes before an unconfirmed action card expires.
     'actions_expire_after' => 15,

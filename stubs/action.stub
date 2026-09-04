@@ -79,6 +79,16 @@ class {{ class }} extends SidekickAction
     //     return \Devletes\Sidekick\Enums\ConfirmationMode::Modal;
     // }
 
+    // Name what this action cannot work without — the model it writes, the
+    // resource it belongs to. Delete one and the action stops being offered
+    // and stops being confirmable, rather than failing at execute() time;
+    // `php artisan sidekick:check` reports it:
+    //
+    // public function dependsOn(): array
+    // {
+    //     return [Thing::class];
+    // }
+
     // Conventions you can override:
     // - type():         defaults to the snake_cased class name
     // - label():        status line while the proposal is prepared
@@ -88,4 +98,5 @@ class {{ class }} extends SidekickAction
     // - panels():       panel ids whose assistant offers this action
     //                   (default: ['*'] = every panel)
     // - confirmation(): inline (default) or modal presentation
+    // - dependsOn():    classes whose deletion should withhold this action
 }

@@ -15,10 +15,12 @@ class WorkbenchServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        // testbench's app_path() is the skeleton's, so point discovery at the workbench.
+        // testbench's app_path() is the skeleton's, so point discovery at the workbench. One root is enough:
+        // the scan recurses into Tools/ and Actions/, and skips WorkbenchRoutes at the top (it is a resolver).
         config([
-            'sidekick.discover.tools' => __DIR__.'/../Sidekick/Tools',
-            'sidekick.discover.actions' => __DIR__.'/../Sidekick/Actions',
+            'sidekick.discover.paths' => __DIR__.'/../Sidekick',
+            // History and insights are switched on through the plugin API in AdminPanelProvider — page
+            // registration happens before this provider boots, so config set here would be too late.
             'sidekick.assistant.name' => 'Sidekick',
             'sidekick.assistant.description' => 'Ask about your leave, or ask me to book time off for you.',
             'sidekick.stale_after' => 86400,

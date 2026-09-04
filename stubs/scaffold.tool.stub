@@ -38,6 +38,15 @@ class {{ class }} extends ChatToolBase
         return [{{ panels }}];
     }
 
+    /**
+     * What this tool cannot work without. Delete {{ resourceBasename }} and Sidekick withholds this tool
+     * instead of fataling mid-turn; `php artisan sidekick:check` names the file so you can fix or remove it.
+     */
+    public function dependsOn(): array
+    {
+        return [{{ resourceBasename }}::class];
+    }
+
     // TODO: restrict who is offered this tool, e.g.:
     //
     // public function authorize(\Illuminate\Contracts\Auth\Authenticatable $user): bool

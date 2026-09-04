@@ -194,6 +194,21 @@ body.sidekick-ready.sidekick-topbar-outside .fi-topbar-ctn {
     gap: var(--spacing, 0.25rem);
 }
 
+/* Conversation titles are the first message truncated, so they still run long in a narrow dock. */
+.sidekick-history-item .fi-dropdown-list-item-label {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sidekick-history-empty {
+    padding: var(--spacing, 0.75rem);
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--sidekick-muted);
+}
+
 .sidekick-log {
     flex: 1;
     min-height: 0;

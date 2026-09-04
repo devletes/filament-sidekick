@@ -54,6 +54,11 @@ class ActionProposalTool extends ChatToolBase
         return $this->action->panels();
     }
 
+    public function dependsOn(): array
+    {
+        return $this->action->dependsOn();
+    }
+
     public function handle(Request $request): string
     {
         if (! $this->user) {

@@ -39,6 +39,12 @@ abstract class ChatToolBase implements ChatTool
         return ['*'];
     }
 
+    /** Name the resources and models this tool reads, and deleting one becomes a reported problem instead of a surprise. */
+    public function dependsOn(): array
+    {
+        return [];
+    }
+
     /** Compact JSON reads best for the model. */
     protected function respond(array $payload): string
     {

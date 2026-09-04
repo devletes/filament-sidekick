@@ -19,13 +19,53 @@
         <span class="sidekick-header-title">{{ $assistantName }}</span>
 
         <span class="sidekick-header-actions">
+            @if ($historyEnabled)
+                {{-- Teleported and shifted: the panel's own card is overflow-hidden and positioned, so an
+                     in-place dropdown is clipped by it and anchored against the wrong containing block. --}}
+                <x-filament::dropdown
+                    placement="bottom-end"
+                    width="xs"
+                    teleport
+                    shift
+                    class="sidekick-history"
+                >
+                    <x-slot name="trigger">
+                        <x-filament::icon-button
+                            :icon="$icons['history']"
+                            color="gray"
+                            size="sm"
+                            :label="__('sidekick::messages.header.history')"
+                            :tooltip="__('sidekick::messages.header.history')"
+                        />
+                    </x-slot>
+
+                    <x-filament::dropdown.header :icon="$icons['history']">
+                        {{ __('sidekick::messages.history.heading') }}
+                    </x-filament::dropdown.header>
+
+                    <x-filament::dropdown.list>
+                        @forelse ($recentConversations as $conversation)
+                            <x-filament::dropdown.list.item
+                                wire:click="openConversation('{{ $conversation->id }}')"
+                                :badge="$conversation->id === $conversationId ? __('sidekick::messages.history.current') : null"
+                                class="sidekick-history-item"
+                            >
+                                {{ $conversation->title ?: __('sidekick::messages.history.untitled') }}
+                            </x-filament::dropdown.list.item>
+                        @empty
+                            <p class="sidekick-history-empty">{{ __('sidekick::messages.history.empty') }}</p>
+                        @endforelse
+                    </x-filament::dropdown.list>
+                </x-filament::dropdown>
+            @endif
+
             @if ($messages->isNotEmpty() || $activeRun)
                 <x-filament::icon-button
                     :icon="$icons['new_conversation']"
                     color="gray"
                     size="sm"
-                    label="New conversation"
-                    tooltip="New conversation"
+                    :label="__('sidekick::messages.header.new_conversation')"
+                    :tooltip="__('sidekick::messages.header.new_conversation')"
                     wire:click="newConversation"
                     wire:loading.attr="disabled"
                     wire:target="newConversation"
@@ -37,7 +77,7 @@
                 :icon="$icons['close']"
                 color="gray"
                 size="sm"
-                label="Close assistant"
+                :label="__('sidekick::messages.header.close')"
                 class="sidekick-close"
                 x-data
                 x-on:click="$store.sidekick.set(false)"
@@ -63,8 +103,8 @@
                             wire:loading.attr="disabled"
                             wire:target="resumeConversation"
                         >
-                            <span wire:loading.remove wire:target="resumeConversation">Resume last conversation</span>
-                            <span wire:loading wire:target="resumeConversation">Loading conversation…</span>
+                            <span wire:loading.remove wire:target="resumeConversation">{{ __('sidekick::messages.empty_state.resume') }}</span>
+                            <span wire:loading wire:target="resumeConversation">{{ __('sidekick::messages.empty_state.resuming') }}</span>
                         </x-filament::link>
                     </x-slot>
                 @endif
@@ -77,13 +117,13 @@
                 <div class="sidekick-action-outcome sidekick-action-outcome-{{ $action->status }}" wire:key="sidekick-action-{{ $action->id }}">
                     {{ $action->summary }} —
                     @if ($action->status === PendingAction::STATUS_EXECUTED)
-                        {{ $action->result ?: 'done' }}
+                        {{ $action->result ?: __('sidekick::messages.outcome.done') }}
                     @elseif ($action->status === PendingAction::STATUS_FAILED)
-                        failed: {{ $action->result }}
+                        {{ __('sidekick::messages.outcome.failed', ['reason' => $action->result]) }}
                     @elseif ($action->status === PendingAction::STATUS_CANCELLED)
-                        {{ $action->result ?: 'cancelled — nothing was done.' }}
+                        {{ $action->result ?: __('sidekick::messages.outcome.cancelled') }}
                     @else
-                        card expired without a response — nothing was done.
+                        {{ __('sidekick::messages.outcome.expired') }}
                     @endif
                 </div>
                 @continue
@@ -110,10 +150,12 @@
                 @endif
             @elseif ($message->role === 'assistant')
                 @foreach ($message->decodedToolCalls() as $call)
-                    @continue(($call['name'] ?? '') === 'PresentActions')
+                    {{-- In catalog mode the persisted name is RunTool; ranTool() reports what it actually ran. --}}
+                    @php $ran = ToolRegistry::ranTool($call['name'] ?? '', $call['arguments'] ?? []); @endphp
+                    @continue($ran === 'PresentActions')
                     <div class="sidekick-activity">
                         <x-filament::icon :icon="$icons['tool_done']" class="sidekick-activity-icon" />
-                        <span>{{ app(ToolRegistry::class)->labelFor($call['name'] ?? '') ?? ($call['name'] ?? 'tool') }}</span>
+                        <span>{{ app(ToolRegistry::class)->labelFor($ran) ?? ($ran ?: 'tool') }}</span>
                     </div>
                 @endforeach
 
@@ -171,7 +213,7 @@
                 {{-- Plain text while streaming (the typewriter owns the text node); markdown arrives with the persisted message. --}}
                 <div class="sidekick-bubble sidekick-bubble-assistant sidekick-stream-text" x-data="sidekickStream">{{ $activeRun->partial_content }}</div>
             @else
-                <div class="sidekick-thinking" aria-label="Thinking">
+                <div class="sidekick-thinking" aria-label="{{ __('sidekick::messages.activity.thinking') }}">
                     <span></span><span></span><span></span>
                 </div>
             @endif
@@ -182,13 +224,13 @@
             <x-filament::callout
                 :color="$failedRun->denied ? 'warning' : 'danger'"
                 :icon="$failedRun->denied ? 'heroicon-m-hand-raised' : 'heroicon-m-exclamation-triangle'"
-                :heading="$failedRun->denied ? 'Not available right now' : 'Something went wrong'"
-                :description="$failedRun->denied ? $failedRun->error : 'The assistant couldn\'t finish that reply.'"
+                :heading="$failedRun->denied ? __('sidekick::messages.errors.denied_heading') : __('sidekick::messages.errors.heading')"
+                :description="$failedRun->denied ? $failedRun->error : __('sidekick::messages.errors.description')"
                 class="sidekick-callout"
             >
                 @unless ($failedRun->denied)
                     <x-slot name="footer">
-                        <x-filament::link tag="button" size="sm" color="danger" wire:click="retry">Try again</x-filament::link>
+                        <x-filament::link tag="button" size="sm" color="danger" wire:click="retry">{{ __('sidekick::messages.errors.retry') }}</x-filament::link>
                     </x-slot>
                 @endunless
             </x-filament::callout>
@@ -208,11 +250,11 @@
             <x-filament::callout
                 color="primary"
                 :icon="$icons['assistant']"
-                heading="A confirmation is waiting"
+                :heading="__('sidekick::messages.card.waiting_heading')"
                 :description="$activeAction->summary"
             >
                 <x-slot name="footer">
-                    <x-filament::link tag="button" size="sm" wire:click="openActionModal">Review it</x-filament::link>
+                    <x-filament::link tag="button" size="sm" wire:click="openActionModal">{{ __('sidekick::messages.card.review') }}</x-filament::link>
                 </x-slot>
             </x-filament::callout>
         </div>
@@ -230,7 +272,7 @@
                             <span class="sidekick-chip-size">{{ $attachment->humanSize() }}</span>
                             <x-slot
                                 name="deleteButton"
-                                :label="'Remove '.$attachment->name"
+                                :label="__('sidekick::messages.composer.remove', ['name' => $attachment->name])"
                                 wire:click="removeAttachment('{{ $attachment->id }}')"
                             ></x-slot>
                         </x-filament::badge>
@@ -244,7 +286,7 @@
                     <textarea
                         wire:model="draft"
                         rows="2"
-                        placeholder="{{ $activeRun ? 'Waiting for '.$assistantName.'…' : 'Message '.$assistantName.'…' }}"
+                        placeholder="{{ $activeRun ? __('sidekick::messages.composer.waiting', ['assistant' => $assistantName]) : __('sidekick::messages.composer.placeholder', ['assistant' => $assistantName]) }}"
                         maxlength="{{ $maxPromptLength }}"
                         x-data
                         x-on:input="$el.style.height = 'auto'; $el.style.height = Math.min($el.scrollHeight, 120) + 'px'"
@@ -264,7 +306,7 @@
                             :label-sr-only="true"
                             wire:target="uploads"
                             class="sidekick-attach-btn"
-                        >Attach files</x-filament::button>
+                        >{{ __('sidekick::messages.composer.attach') }}</x-filament::button>
                         <input
                             id="sidekick-uploads-{{ $this->getId() }}"
                             type="file"
@@ -281,7 +323,7 @@
                         class="sidekick-send-btn"
                         wire:click="send"
                         :disabled="(bool) $activeRun"
-                    >Send</x-filament::button>
+                    >{{ __('sidekick::messages.composer.send') }}</x-filament::button>
                 </div>
             </div>
         </div>

@@ -4,21 +4,24 @@ namespace Devletes\Sidekick;
 
 use Devletes\Sidekick\Assets\HashedCss;
 use Devletes\Sidekick\Assets\HashedJs;
+use Devletes\Sidekick\Console\CheckCommand;
 use Devletes\Sidekick\Console\InstallCommand;
 use Devletes\Sidekick\Console\MakeActionCommand;
 use Devletes\Sidekick\Console\MakeToolCommand;
 use Devletes\Sidekick\Console\PruneAttachments;
 use Devletes\Sidekick\Console\ScaffoldCommand;
 use Devletes\Sidekick\Contracts\ActionResolver;
+use Devletes\Sidekick\Contracts\LimitProvider;
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Livewire\ChatPanel;
 use Devletes\Sidekick\Storage\LeanConversationStore;
+use Devletes\Sidekick\Support\ConfigLimits;
 use Devletes\Sidekick\Support\DefaultSidekickContext;
+use Devletes\Sidekick\Support\MeteredUsage;
 use Devletes\Sidekick\Support\NullActionResolver;
 use Devletes\Sidekick\Support\Profiles;
 use Devletes\Sidekick\Support\SidekickContext;
 use Devletes\Sidekick\Support\SidekickManager;
-use Devletes\Sidekick\Support\UnlimitedUsage;
 use Filament\Support\Facades\FilamentAsset;
 use Illuminate\Support\Facades\Broadcast;
 use Illuminate\Support\ServiceProvider;
@@ -40,9 +43,16 @@ class SidekickServiceProvider extends ServiceProvider
             ),
         );
         $this->app->singletonIf(
+            LimitProvider::class,
+            fn ($app) => $app->make(
+                config('sidekick.limits.provider') ?? ConfigLimits::class,
+            ),
+        );
+        // MeteredUsage is inert until sidekick.limits.enabled, so this default changes nothing until asked.
+        $this->app->singletonIf(
             UsageLimiter::class,
             fn ($app) => $app->make(
-                config('sidekick.usage_limiter') ?? UnlimitedUsage::class,
+                config('sidekick.usage_limiter') ?? MeteredUsage::class,
             ),
         );
         $this->app->singleton(Profiles::class);
@@ -59,6 +69,7 @@ class SidekickServiceProvider extends ServiceProvider
         }
 
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'sidekick');
+        $this->loadTranslationsFrom(__DIR__.'/../resources/lang', 'sidekick');
         $this->loadMigrationsFrom(__DIR__.'/../database/migrations');
 
         $this->publishes([
@@ -69,6 +80,10 @@ class SidekickServiceProvider extends ServiceProvider
             __DIR__.'/../resources/views' => resource_path('views/vendor/sidekick'),
         ], 'sidekick-views');
 
+        $this->publishes([
+            __DIR__.'/../resources/lang' => lang_path('vendor/sidekick'),
+        ], 'sidekick-translations');
+
         Livewire::component('sidekick.chat-panel', ChatPanel::class);
 
         if ($this->app->runningInConsole()) {
@@ -77,6 +92,7 @@ class SidekickServiceProvider extends ServiceProvider
                 MakeToolCommand::class,
                 MakeActionCommand::class,
                 ScaffoldCommand::class,
+                CheckCommand::class,
                 PruneAttachments::class,
             ]);
         }

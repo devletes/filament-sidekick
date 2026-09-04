@@ -9,7 +9,7 @@ use Devletes\Sidekick\Contracts\ProposableAction;
 use Devletes\Sidekick\Tools\ActionProposalTool;
 use Devletes\Sidekick\Tools\Navigate;
 use Devletes\Sidekick\Tools\PresentActions;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
 
 /** Single source of truth for tools and actions; class lists are recomputed per call because config is profile-swapped mid-process. */
 class SidekickManager
@@ -20,8 +20,11 @@ class SidekickManager
     /** @var array<int, class-string<ActionHandler>> */
     protected array $runtimeActions = [];
 
-    /** @var array<string, array<int, string>> Discovery scan cache, keyed by path. */
+    /** @var array<string, array<int, string>> Discovery scan cache, keyed by root path. */
     protected array $discovered = [];
+
+    /** @var array<string, true> Classes already logged as withheld, so one broken tool cannot flood the log. */
+    protected array $withheld = [];
 
     /**
      * Register tool classes at runtime (works in queue workers, unlike per-panel plugin state).
@@ -52,7 +55,7 @@ class SidekickManager
     {
         return array_values(array_unique([
             ...array_values((array) config('sidekick.tools', [])),
-            ...$this->discoveredClasses('tools', ChatTool::class),
+            ...$this->discoveredClasses(ChatTool::class),
             ...$this->runtimeTools,
         ]));
     }
@@ -62,7 +65,7 @@ class SidekickManager
     {
         return array_values(array_unique([
             ...array_values((array) config('sidekick.actions', [])),
-            ...$this->discoveredClasses('actions', ActionHandler::class),
+            ...$this->discoveredClasses(ActionHandler::class),
             ...$this->runtimeActions,
         ]));
     }
@@ -74,7 +77,16 @@ class SidekickManager
      */
     public function toolInstances(): array
     {
-        $tools = array_map(fn (string $class): ChatTool => app($class), $this->toolClasses());
+        $tools = [];
+
+        foreach ($this->toolClasses() as $class) {
+            /** @var ChatTool $tool */
+            $tool = app($class);
+
+            if (! $this->isWithheld($tool)) {
+                $tools[] = $tool;
+            }
+        }
 
         foreach ($this->actionInstances() as $action) {
             if ($action instanceof ProposableAction) {
@@ -88,7 +100,54 @@ class SidekickManager
     /** @return array<int, ActionHandler> */
     public function actionInstances(): array
     {
-        return array_map(fn (string $class): ActionHandler => app($class), $this->actionClasses());
+        $actions = [];
+
+        foreach ($this->actionClasses() as $class) {
+            /** @var ActionHandler $action */
+            $action = app($class);
+
+            if (! $this->isWithheld($action)) {
+                $actions[] = $action;
+            }
+        }
+
+        return $actions;
+    }
+
+    /**
+     * Classes from dependsOn() that no longer exist. A tool that names what it needs can be withheld cleanly
+     * instead of fataling mid-turn, and sidekick:check can report it before anyone chats.
+     *
+     * @return array<int, class-string>
+     */
+    public static function missingDependencies(ChatTool|ActionHandler $handler): array
+    {
+        return array_values(array_filter(
+            $handler->dependsOn(),
+            fn (string $dependency): bool => ! class_exists($dependency)
+                && ! interface_exists($dependency)
+                && ! enum_exists($dependency),
+        ));
+    }
+
+    /** Withhold a handler whose dependencies are gone, logging once per class so the silence is never total. */
+    protected function isWithheld(ChatTool|ActionHandler $handler): bool
+    {
+        $missing = static::missingDependencies($handler);
+
+        if ($missing === []) {
+            return false;
+        }
+
+        $class = $handler::class;
+
+        if (! isset($this->withheld[$class])) {
+            $this->withheld[$class] = true;
+
+            Log::warning("Sidekick withheld [{$class}]: missing ".implode(', ', $missing).'. Run `php artisan sidekick:check`.');
+        }
+
+        return true;
     }
 
     /** The registered handler for an action type, if any. */
@@ -126,38 +185,71 @@ class SidekickManager
     }
 
     /**
-     * Classes under the discovery path; anything not implementing the contract is skipped, so helpers can live alongside.
+     * Classes under the discovery roots; anything not implementing the contract is skipped, so helpers and
+     * sub-namespaces can live alongside. Roots are scanned recursively — organise by domain or by kind freely.
      *
      * @param  class-string  $contract
      * @return array<int, string>
      */
-    protected function discoveredClasses(string $kind, string $contract): array
+    protected function discoveredClasses(string $contract): array
     {
         if (! config('sidekick.discover.enabled', true)) {
             return [];
         }
 
-        $path = config("sidekick.discover.{$kind}")
-            ?? app_path('Sidekick/'.Str::studly($kind));
+        $classes = [];
 
-        $classes = $this->discovered[$path] ??= $this->scan($path);
+        foreach ($this->discoveryPaths() as $path) {
+            $classes = [...$classes, ...$this->discovered[$path] ??= $this->scan($path)];
+        }
 
         return array_values(array_filter(
-            $classes,
+            array_unique($classes),
             fn (string $class): bool => is_subclass_of($class, $contract),
         ));
     }
 
-    /** @return array<int, string> Instantiable classes declared by the PHP files in $path. */
+    /**
+     * Discovery roots, normalised and deduplicated. Each should be a tree that only holds Sidekick classes —
+     * discovery autoloads what it finds, so pointing a root at a shared tree like app/Filament costs real boot time.
+     *
+     * @return array<int, string>
+     */
+    protected function discoveryPaths(): array
+    {
+        $paths = config('sidekick.discover.paths') ?? app_path('Sidekick');
+
+        return array_values(array_unique(array_filter(array_map(
+            fn ($path): string => rtrim((string) $path, '/\\'),
+            (array) $paths,
+        ))));
+    }
+
+    /** @return array<int, string> Instantiable classes declared anywhere beneath $path. */
     protected function scan(string $path): array
     {
         if (! is_dir($path)) {
             return [];
         }
 
+        $files = [];
+
+        $iterator = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS | \FilesystemIterator::CURRENT_AS_FILEINFO),
+        );
+
+        foreach ($iterator as $file) {
+            if ($file->isFile() && $file->getExtension() === 'php') {
+                $files[] = $file->getPathname();
+            }
+        }
+
+        // Filesystem order varies by platform; sorting keeps the registry (and so the system prompt) stable.
+        sort($files);
+
         $classes = [];
 
-        foreach (glob($path.'/*.php') ?: [] as $file) {
+        foreach ($files as $file) {
             $class = $this->classFromFile($file);
 
             if ($class !== null && class_exists($class) && ! (new \ReflectionClass($class))->isAbstract()) {
@@ -171,9 +263,17 @@ class SidekickManager
     /** Resolve a file to its FQCN by reading the namespace declaration — no assumptions about the host's root namespace. */
     protected function classFromFile(string $file): ?string
     {
-        $contents = (string) file_get_contents($file);
+        $handle = @fopen($file, 'rb');
 
-        if (! preg_match('/^namespace\s+([^;]+);/m', $contents, $namespace)) {
+        if ($handle === false) {
+            return null;
+        }
+
+        // The declaration is always in the opening lines, so never read a whole file to find it.
+        $head = (string) fread($handle, 8192);
+        fclose($handle);
+
+        if (! preg_match('/^namespace\s+([^;]+);/m', $head, $namespace)) {
             return null;
         }
 
@@ -186,5 +286,6 @@ class SidekickManager
         $this->runtimeTools = [];
         $this->runtimeActions = [];
         $this->discovered = [];
+        $this->withheld = [];
     }
 }

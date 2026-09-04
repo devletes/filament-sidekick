@@ -6,7 +6,13 @@ use BladeUI\Heroicons\BladeHeroiconsServiceProvider;
 use BladeUI\Icons\BladeIconsServiceProvider;
 use Devletes\Sidekick\SidekickServiceProvider;
 use Filament\Actions\ActionsServiceProvider;
+use Filament\Forms\FormsServiceProvider;
+use Filament\Infolists\InfolistsServiceProvider;
+use Filament\Notifications\NotificationsServiceProvider;
+use Filament\Schemas\SchemasServiceProvider;
 use Filament\Support\SupportServiceProvider;
+use Filament\Tables\TablesServiceProvider;
+use Filament\Widgets\WidgetsServiceProvider;
 use Livewire\LivewireServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
 
@@ -19,6 +25,13 @@ abstract class TestCase extends Orchestra
             BladeHeroiconsServiceProvider::class,
             SupportServiceProvider::class,
             ActionsServiceProvider::class,
+            // Needed by the insights widgets; inert for every other test.
+            FormsServiceProvider::class,
+            InfolistsServiceProvider::class,
+            NotificationsServiceProvider::class,
+            SchemasServiceProvider::class,
+            TablesServiceProvider::class,
+            WidgetsServiceProvider::class,
             LivewireServiceProvider::class,
             SidekickServiceProvider::class,
         ];

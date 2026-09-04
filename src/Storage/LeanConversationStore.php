@@ -2,6 +2,7 @@
 
 namespace Devletes\Sidekick\Storage;
 
+use Devletes\Sidekick\Support\TokenBudget;
 use Illuminate\Support\Collection;
 use Laravel\Ai\Messages\AssistantMessage;
 use Laravel\Ai\Messages\Message;
@@ -11,6 +12,12 @@ use Laravel\Ai\Storage\DatabaseConversationStore;
 class LeanConversationStore extends DatabaseConversationStore
 {
     public function getLatestConversationMessages(string $conversationId, int $limit): Collection
+    {
+        return $this->trimToBudget($this->rehydrate($conversationId, $limit));
+    }
+
+    /** @return Collection<int, Message> */
+    protected function rehydrate(string $conversationId, int $limit): Collection
     {
         return $this->table($this->messagesTable())
             ->where('conversation_id', $conversationId)
@@ -41,6 +48,40 @@ class LeanConversationStore extends DatabaseConversationStore
                         : new AssistantMessage($content),
                 ];
             });
+    }
+
+    /**
+     * A row cap alone says nothing about prompt size — ten pasted logs dwarf ten "thanks". When a token budget
+     * is set, drop whole messages newest-first-inwards until the estimate fits.
+     *
+     * @param  Collection<int, Message>  $messages
+     * @return Collection<int, Message>
+     */
+    protected function trimToBudget(Collection $messages): Collection
+    {
+        $budget = config('sidekick.history_token_budget');
+
+        if ($budget === null) {
+            return $messages;
+        }
+
+        $budget = max(0, (int) $budget);
+        $kept = [];
+        $spent = 0;
+
+        foreach ($messages->reverse() as $message) {
+            $cost = TokenBudget::estimate((string) $message->content);
+
+            // Always keep the most recent message: a single oversized turn should shrink history, not erase it.
+            if ($kept !== [] && $spent + $cost > $budget) {
+                break;
+            }
+
+            $kept[] = $message;
+            $spent += $cost;
+        }
+
+        return collect(array_reverse($kept));
     }
 
     protected function attachmentNote(mixed $attachments): string

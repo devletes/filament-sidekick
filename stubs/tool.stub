@@ -56,6 +56,17 @@ class {{ class }} extends ChatToolBase
     //     return ['admin'];
     // }
 
+    // Name what this tool cannot work without — the resource it queries, the
+    // model it reads. Delete one and the tool is withheld from the assistant
+    // rather than fataling mid-turn, and `php artisan sidekick:check` reports
+    // it. Run `sidekick:check --uses=App\Models\Thing` before deleting
+    // something to see which tools go with it:
+    //
+    // public function dependsOn(): array
+    // {
+    //     return [Thing::class];
+    // }
+
     /**
      * Read-only work happens here; $this->user is the chatting user — scope
      * every query to them. Return compact data for the model (respond()
