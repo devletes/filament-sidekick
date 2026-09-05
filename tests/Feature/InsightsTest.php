@@ -7,6 +7,7 @@ use Devletes\Sidekick\Support\Insights;
 use Devletes\Sidekick\Tests\Fixtures\FakeUser;
 use Devletes\Sidekick\Tests\Fixtures\Models\Employee;
 use Devletes\Sidekick\Widgets\RecentRuns;
+use Devletes\Sidekick\Widgets\TenantUsage;
 use Devletes\Sidekick\Widgets\TurnsChart;
 use Devletes\Sidekick\Widgets\UsageOverview;
 use Filament\Facades\Filament;
@@ -149,6 +150,120 @@ it('keeps prompts out of the recent-runs table unless asked for', function () {
     config()->set('sidekick.insights.show_prompts', true);
 
     Livewire::test(RecentRuns::class)->assertSee('my private question');
+});
+
+it('breaks usage down per tenant on a panel that spans them', function () {
+    inPanel();
+
+    insightRun(tenant: 'acme', tokens: 100);
+    insightRun(tenant: 'acme', tokens: 50, status: Run::STATUS_FAILED);
+    insightRun(tenant: 'globex', tokens: 300);
+    insightRun(tenant: null, tokens: 10);
+
+    $rows = Insights::perTenantQuery()->orderByDesc('turns')->get()->keyBy('tenant_id');
+
+    expect($rows)->toHaveCount(3)
+        ->and((int) $rows['acme']->turns)->toBe(2)
+        ->and((int) $rows['acme']->tokens)->toBe(150)
+        ->and((int) $rows['acme']->failed)->toBe(1)
+        ->and((int) $rows['globex']->turns)->toBe(1)
+        // Runs with no tenant are still someone's usage; they get their own bucket rather than being dropped.
+        ->and((int) $rows['']->turns)->toBe(1);
+});
+
+it('counts distinct people per tenant rather than turns', function () {
+    inPanel();
+
+    insightRun(tenant: 'acme');
+    insightRun(tenant: 'acme');
+
+    $acme = Insights::perTenantQuery()->get()->firstWhere('tenant_id', 'acme');
+
+    expect((int) $acme->people)->toBe(1)
+        ->and((int) $acme->turns)->toBe(2);
+});
+
+it('labels the tenantless bucket rather than leaving it blank', function () {
+    inPanel();
+    insightRun(tenant: null);
+
+    expect(Insights::tenantLabel(null))->toBe('No tenant');
+});
+
+it('names tenants when a tenant model is configured, and falls back to the id', function () {
+    Schema::create('employees', function (Blueprint $table) {
+        $table->id();
+        $table->string('name')->nullable();
+        $table->timestamps();
+    });
+
+    inPanel();
+
+    $acme = Employee::query()->create(['name' => 'Acme Ltd']);
+    insightRun(tenant: (string) $acme->getKey());
+    insightRun(tenant: '4242');
+
+    config()->set('sidekick.insights.tenant_model', Employee::class);
+    Insights::forgetLabels();
+
+    expect(Insights::tenantLabel((string) $acme->getKey()))->toBe('Acme Ltd')
+        // Unknown id: shown as itself rather than blank.
+        ->and(Insights::tenantLabel('4242'))->toBe('4242');
+});
+
+it('shows the per-tenant breakdown only on a cross-tenant panel of a multi-tenant install', function () {
+    Schema::create('employees', function (Blueprint $table) {
+        $table->id();
+        $table->string('name')->nullable();
+        $table->timestamps();
+    });
+
+    registerFilamentPanels(app());
+
+    // A console beside a tenant panel: this is the one case worth breaking down.
+    Filament::setCurrentPanel('testing');
+    expect(Insights::isMultiTenant())->toBeTrue()
+        ->and(TenantUsage::canView())->toBeTrue();
+
+    // A tenant panel is already one tenant; the split would be a single row.
+    Filament::setCurrentPanel('tenanted');
+    expect(TenantUsage::canView())->toBeFalse();
+});
+
+it('never offers a per-tenant breakdown on a single-tenant install', function () {
+    registerFilamentPanels(app());
+    // Detection asks the panels; forcing it off stands in for an app with no tenant panel at all.
+    config()->set('sidekick.tenancy.multi_tenant', false);
+    Filament::setCurrentPanel('testing');
+
+    // Otherwise every run has a null tenant and the breakdown is one meaningless row.
+    expect(Insights::spansTenants())->toBeFalse()
+        ->and(TenantUsage::canView())->toBeFalse();
+});
+
+it('lets config override tenancy detection in both directions', function () {
+    registerFilamentPanels(app());
+    Filament::setCurrentPanel('testing');
+
+    config()->set('sidekick.tenancy.multi_tenant', true);
+    expect(Insights::isMultiTenant())->toBeTrue();
+
+    config()->set('sidekick.tenancy.multi_tenant', false);
+    expect(Insights::isMultiTenant())->toBeFalse();
+
+    // null falls back to detection, and this app does have a tenant panel.
+    config()->set('sidekick.tenancy.multi_tenant', null);
+    expect(Insights::isMultiTenant())->toBeTrue();
+});
+
+it('renders the per-tenant widget', function () {
+    inPanel();
+    insightRun(tenant: 'acme', tokens: 120);
+
+    Livewire::test(TenantUsage::class)
+        ->assertOk()
+        ->assertSee('Usage by tenant')
+        ->assertSee('acme');
 });
 
 it('refuses access while insights are switched off', function () {

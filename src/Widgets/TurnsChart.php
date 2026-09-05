@@ -11,6 +11,12 @@ class TurnsChart extends ChartWidget
 
     protected int|string|array $columnSpan = 'full';
 
+    /**
+     * Without this the canvas keeps Chart.js's default 2:1 ratio, and a full-width widget on a wide screen
+     * becomes a thousand pixels tall. Fixed height, and the chart fills it.
+     */
+    protected ?string $maxHeight = '320px';
+
     public function getHeading(): ?string
     {
         return __('sidekick::messages.insights.chart_heading');
@@ -47,6 +53,8 @@ class TurnsChart extends ChartWidget
     protected function getOptions(): array
     {
         return [
+            // The container height above is authoritative; without this Chart.js still sizes by ratio.
+            'maintainAspectRatio' => false,
             'scales' => [
                 'y' => ['position' => 'left', 'beginAtZero' => true],
                 'tokens' => [

@@ -5,6 +5,7 @@ namespace Devletes\Sidekick\Widgets;
 use Devletes\Sidekick\Models\Run;
 use Devletes\Sidekick\Support\Insights;
 use Devletes\Sidekick\Support\ToolRegistry;
+use Filament\Tables\Columns\Column;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Filament\Widgets\TableWidget;
@@ -26,8 +27,11 @@ class RecentRuns extends TableWidget
                     ->since()
                     ->tooltip(fn (Run $run): string => (string) $run->created_at),
 
-                TextColumn::make('user_id')
-                    ->label(__('sidekick::messages.insights.user')),
+                // Only where the page spans tenants: a single-tenant app has no tenant to name, and on a
+                // tenant panel every row is the same one.
+                Insights::spansTenants() ? $this->tenantColumn() : null,
+
+                $this->userColumn(),
 
                 // Off by default: a prompt is the person's own words, and an operator dashboard is not
                 // automatically the right place to read them.
@@ -61,6 +65,32 @@ class RecentRuns extends TableWidget
                     ->numeric()
                     ->alignEnd(),
             ])));
+    }
+
+    /** Override to render a tenant however you like — an avatar, a link to the account. */
+    protected function tenantColumn(): Column
+    {
+        return TextColumn::make('tenant_id')
+            ->label(__('sidekick::messages.insights.tenant'))
+            ->state(function (Run $record): string {
+                // Resolve the whole page in one query the first time a cell asks.
+                Insights::primeTenantLabels($this->getTableRecords()->pluck('tenant_id'));
+
+                return Insights::tenantLabel($record->tenant_id);
+            })
+            ->toggleable();
+    }
+
+    /** Override to render a person however you like — the same component your app uses everywhere else. */
+    protected function userColumn(): Column
+    {
+        return TextColumn::make('user_id')
+            ->label(__('sidekick::messages.insights.user'))
+            ->state(function (Run $record): string {
+                Insights::primeUserLabels($this->getTableRecords()->pluck('user_id'));
+
+                return Insights::userLabel($record->user_id);
+            });
     }
 
     /** The tools a run actually called, by their human labels rather than class names. */

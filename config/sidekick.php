@@ -63,18 +63,59 @@ return [
     // Messages rendered in the panel (display only, not model context).
     'display_limit' => 60,
 
+    // Whether this installation serves more than one tenant. Decides whether
+    // the insights page offers a per-tenant breakdown on panels that are not
+    // themselves tenant-scoped — a single-tenant app has nothing to break down.
+    //
+    // null detects it from your panels: any panel with tenancy means yes. Set
+    // true or false to decide it yourself.
+    'tenancy' => [
+        'multi_tenant' => null,
+    ],
+
     // Operator insights page: turns, tokens, failures and recent activity,
     // scoped to the panel's tenant. Off by default. Turn it on per panel with
     // SidekickPlugin::make()->enableInsights(), ideally passing a closure that
     // says who may open it — it totals other people's usage.
     'insights' => [
         'enabled' => false,
-        'slug' => 'sidekick-insights',
-        'icon' => 'heroicon-o-chart-bar',
+
+        // Presentation is not configured here on purpose. Navigation label,
+        // icon, sort, group, sidebar visibility, slug, heading and the widget
+        // list are ordinary members of the page and its widgets, so extend
+        // them and hand the subclass to the panel:
+        //
+        //   class NyraInsights extends \Devletes\Sidekick\Pages\SidekickInsights {
+        //       protected static ?string $navigationLabel = 'Nyra Insights';
+        //   }
+        //
+        //   SidekickPlugin::make()->insightsPage(NyraInsights::class)
+        //
+        // The widgets take the same treatment — RecentRuns::userColumn() and
+        // tenantColumn(), TenantUsage::tenantColumn() — so rendering a person
+        // with your own component is a short subclass, not a rewrite.
 
         // Prompts are the person's own words; an operator dashboard is not
         // automatically the right place to read them back.
         'show_prompts' => false,
+
+        // On a panel WITHOUT tenancy — a platform console — the page adds a
+        // per-tenant breakdown and a tenant column, since its totals span every
+        // tenant. Point these at your tenant model so rows read as customer
+        // names instead of ids; without it they fall back to the raw id.
+        // Both tenants and users show a name rather than an id, and both find
+        // their model on their own: the tenant model comes from whichever panel
+        // declares tenancy, the user model from the panel guard. Set either
+        // explicitly only when that guess is wrong — an app whose runs carry a
+        // tenant but whose panels have no tenancy, say.
+        //
+        // The attribute is the column read as the name. If it does not exist,
+        // the lookup degrades to showing the id rather than erroring.
+        'tenant_model' => null,
+        'tenant_label_attribute' => 'name',
+
+        'user_model' => null,
+        'user_label_attribute' => 'name',
     ],
 
     // Past conversations, reachable from a dropdown next to New conversation.

@@ -18,9 +18,14 @@ class SidekickPlugin implements Plugin
 
     protected ?bool $history = null;
 
+    protected bool $chat = true;
+
     protected ?bool $insights = null;
 
     protected ?Closure $insightsAuthorization = null;
+
+    /** @var class-string<SidekickInsights>|null */
+    protected ?string $insightsPage = null;
 
     protected string|Htmlable|Closure|null $icon = null;
 
@@ -39,6 +44,20 @@ class SidekickPlugin implements Plugin
         }
 
         return $plugin instanceof static ? $plugin : null;
+    }
+
+    /**
+     * Register everything except the chat panel itself — no toggle button, no dock.
+     *
+     * For a panel that wants the insights page and nothing else: an admin console, or any panel where the
+     * assistant makes no sense. Worth reaching for whenever a panel has no tenant, since a chat mounted there
+     * has nothing for a tenant-scoped SidekickContext to scope a conversation to.
+     */
+    public function withoutChat(): static
+    {
+        $this->chat = false;
+
+        return $this;
     }
 
     /**
@@ -64,6 +83,29 @@ class SidekickPlugin implements Plugin
     public function getInsightsAuthorization(): ?Closure
     {
         return $this->insightsAuthorization;
+    }
+
+    /**
+     * Use your own page class instead of the packaged one — extend SidekickInsights and override whatever
+     * you need, which is how a Filament page is customised anywhere else.
+     *
+     * This is deliberately the only customisation hook. Navigation label, icon, sort, group, sidebar
+     * visibility, slug, heading and the widget list are all ordinary page members, so a subclass reaches
+     * them without the package having to grow a setter for each one.
+     *
+     * @param  class-string<SidekickInsights>|null  $page
+     */
+    public function insightsPage(?string $page): static
+    {
+        $this->insightsPage = $page;
+
+        return $this;
+    }
+
+    /** @return class-string<SidekickInsights> */
+    public function getInsightsPage(): string
+    {
+        return $this->insightsPage ?? SidekickInsights::class;
     }
 
     /** Run this panel's assistant under a named `sidekick.profiles.*` entry. */
@@ -113,7 +155,11 @@ class SidekickPlugin implements Plugin
 
         // Registered whenever the panel asked for it; canAccess() still gates who may open it.
         if ($this->insights ?? config('sidekick.insights.enabled', false)) {
-            $panel->pages([SidekickInsights::class]);
+            $panel->pages([$this->getInsightsPage()]);
+        }
+
+        if (! $this->chat) {
+            return;
         }
 
         $panel

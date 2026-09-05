@@ -387,6 +387,78 @@ Pass a closure to say who may open it. Without one it is visible to anyone who c
 
 **It is tenant-scoped, and fails closed.** On a tenant panel it shows that tenant's runs and nothing else. If tenancy is on but no tenant resolved, it shows nothing rather than everything. Prompts are hidden by default — they are the person's own words — and `sidekick.insights.show_prompts` opts back in.
 
+### On a panel with no chat
+
+An admin console usually wants the numbers without an assistant — and mounting one there is worse than pointless, since a panel with no tenant gives a tenant-scoped `SidekickContext` nothing to scope a conversation to:
+
+```php
+SidekickPlugin::make()
+    ->enableInsights(fn ($user) => $user->isPlatformAdmin())
+    ->withoutChat()
+```
+
+`withoutChat()` registers everything except the toggle button and the dock.
+
+### Per-tenant breakdown
+
+A console spans tenants, so the page adds a usage-by-tenant table and a tenant column on recent runs.
+
+Both tenants and users show a **name, not an id, with no configuration**. The tenant model comes from whichever panel declares tenancy; the user model comes from the panel's auth guard; both read a `name` column. Point them somewhere else only if that guess is wrong:
+
+```php
+'insights' => [
+    'tenant_model' => \App\Models\Tenant::class,   // usually unnecessary
+    'tenant_label_attribute' => 'title',
+    'user_label_attribute' => 'full_name',
+],
+```
+
+If the attribute doesn't exist, the lookup degrades to the id rather than erroring.
+
+That breakdown appears **only** where it means something: a multi-tenant install, on a panel that is not itself tenant-scoped. A single-tenant app has nothing to break down and a tenant panel is already one tenant — both would get a single meaningless row.
+
+Whether the install is multi-tenant is detected from your panels: any panel with tenancy means yes. Override it with `sidekick.tenancy.multi_tenant` (`true`/`false`) if detection is wrong for your setup.
+
+User ids resolve to names with no configuration — the model is the panel guard's own. Set `insights.user_label_attribute` if the name lives somewhere other than `name`.
+
+### Making it yours
+
+There is no configuration for how the page looks, deliberately. It is an ordinary Filament page, so change it the ordinary way — extend it and hand the subclass to the panel:
+
+```php
+class NyraInsights extends \Devletes\Sidekick\Pages\SidekickInsights
+{
+    protected static ?string $navigationLabel = 'Nyra Insights';
+    protected static string | BackedEnum | null $navigationIcon = 'heroicon-o-sparkles';
+    protected static ?int $navigationSort = 42;
+    protected static string | UnitEnum | null $navigationGroup = 'Reports';
+}
+```
+
+```php
+SidekickPlugin::make()
+    ->enableInsights(fn ($user) => $user->isAdmin())
+    ->insightsPage(NyraInsights::class)
+```
+
+That one hook reaches everything a page has: label, icon, sort, group, `$slug` for the route, `getTitle()` for the heading, `shouldRegisterNavigation()` to keep the route while dropping the sidebar entry, `getHeaderWidgets()` for the widget list, header actions, polling. Per panel, because each panel registers its own — a workspace and an admin console rarely want the same thing.
+
+Widgets take the same treatment. Both tables are ordinary Filament tables, so any column component works:
+
+```php
+use Zvizvi\UserFields\Components\UserColumn;
+
+class RecentRuns extends \Devletes\Sidekick\Widgets\RecentRuns
+{
+    protected function userColumn(): Column
+    {
+        return UserColumn::make('user_id');
+    }
+}
+```
+
+`RecentRuns` exposes `userColumn()` and `tenantColumn()`; `TenantUsage` exposes `tenantColumn()`. Everything else — the query, the aggregates, the tenant scoping — is inherited, so you keep getting fixes to it. List your subclass from your own page's `getHeaderWidgets()`.
+
 ## Usage limits
 
 Sidekick meters every turn and ships a limiter that enforces allowances at two levels, because that is how a multi-tenant product actually sells: the platform caps each tenant, and the tenant divides its cap among its people.

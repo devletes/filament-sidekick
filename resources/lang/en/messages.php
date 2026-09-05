@@ -101,6 +101,12 @@ return [
         'status' => 'Status',
         'tools' => 'Tools used',
         'denied' => 'refused',
+        'by_tenant' => 'Usage by tenant, this month',
+        'tenant' => 'Tenant',
+        'people' => 'People',
+        'failed' => 'Failed',
+        'no_tenant' => 'No tenant',
+        'no_usage' => 'No assistant usage recorded this month.',
     ],
 
     'activity' => [
