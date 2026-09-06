@@ -12,12 +12,28 @@ jobs:
     tests:
         runs-on: ubuntu-latest
 
+        name: PHP ${{ matrix.php }} · Laravel ${{ matrix.laravel }}
+
         strategy:
             fail-fast: false
             matrix:
+                # 8.3 is the floor: every laravel/ai release we support requires it.
                 php:
-                    - "8.2"
                     - "8.3"
+                    - "8.4"
+                # testbench 10 is Laravel 12, testbench 11 is Laravel 13. Both are
+                # supported, so both are tested — a package that claims a range
+                # without exercising its ends is guessing.
+                testbench:
+                    - "^10.0"
+                    - "^11.0"
+                # Overlaps `testbench`, so these only attach a readable label to
+                # the matching combinations rather than adding jobs of their own.
+                include:
+                    - testbench: "^10.0"
+                      laravel: "12"
+                    - testbench: "^11.0"
+                      laravel: "13"
 
         steps:
             - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -26,6 +42,8 @@ jobs:
               with:
                   php-version: ${{ matrix.php }}
                   coverage: none
+
+            - run: composer require --dev "orchestra/testbench:${{ matrix.testbench }}" --no-interaction --no-update
 
             - uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
 

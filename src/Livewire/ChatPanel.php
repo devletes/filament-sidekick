@@ -405,6 +405,12 @@ class ChatPanel extends Component
         $conversation = new Conversation([
             ...app(SidekickContext::class)->attributes($user),
             'user_id' => $user->getAuthIdentifier(),
+            // laravel/ai ≥ 0.10 keys the owner polymorphically; written alongside
+            // user_id so its participant lookups and the messages it stores agree.
+            ...(method_exists(Conversation::class, 'participantType') ? [
+                'participant_type' => Conversation::participantType($user),
+                'participant_id' => Conversation::participantKey($user),
+            ] : []),
             'profile' => app(Profiles::class)->current(),
             'title' => Str::limit($firstMessage, 60, preserveWords: true),
         ]);

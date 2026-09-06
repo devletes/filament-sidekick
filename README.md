@@ -32,7 +32,7 @@ Around that: a panel that pushes the page aside instead of covering it, queued t
 ## Requirements
 
 - PHP `^8.3` — every `laravel/ai` release we support requires it
-- Filament `^5.0` on Laravel 12 or 13
+- Filament `^5.0` on Laravel 12 or 13 — the suite runs against both
 - `laravel/ai` `^0.7` through `^0.11`, with a configured provider
 - A queue worker — turns are queued jobs
 

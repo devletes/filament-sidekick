@@ -25,11 +25,13 @@ All notable changes to `devletes/filament-sidekick` will be documented in this f
 - Label lookups were primed from every run ever recorded. They now resolve only the ids on screen, one query per page.
 - The per-tenant insights table failed on MySQL with `only_full_group_by`. Filament appends a primary-key tiebreaker to every sort (`order by turns desc, sidekick_runs.id desc`), which MySQL rejects against a `GROUP BY` since `id` is neither grouped nor aggregated. The aggregate now runs as a subquery, leaving the outer select ungrouped. Verified against MySQL with `ONLY_FULL_GROUP_BY` enabled — the package's own suite runs on SQLite, which does not enforce it.
 
+- Every turn failed on laravel/ai 0.10 and later with `table agent_conversation_messages has no column named approval_state`. laravel/ai 0.10 made the conversation owner polymorphic (`participant_type` + `participant_id`) and added `approval_state` to messages, and its store writes those columns unconditionally — but a host whose tables came from this package's original migration never had them. A new migration adds the columns to both tables, backfills the participant pair from `user_id` using the host user model's morph class, and leaves `user_id` in place since the package's own scopes and insights read it. New conversations now record both.
 - `Conversation` and `ConversationMessage` declare `$incrementing = false` explicitly. laravel/ai marks its own models with a `#[WithoutIncrementing]` attribute that does not exist in every supported framework release; where it is missing the attribute is ignored, the model auto-increments, and the assigned uuid is discarded on save.
 
 ### Changed
 
 - Widened `laravel/ai` to `^0.7 || ^0.8 || ^0.9 || ^0.10 || ^0.11`. The suite passes against both ends of that range.
+- Laravel 12 and 13 are both supported and both tested. CI now runs a PHP 8.3/8.4 × testbench 10/11 matrix; it previously tested PHP 8.2, which the `^8.3` floor no longer allows, and never exercised Laravel 13 at all.
 
 - `dependsOn()` on tools and actions: name the resources and models a class cannot work without, and deleting one withholds it from the assistant instead of fataling mid-turn.
 - `sidekick:check` reports every tool and action with a missing dependency and exits non-zero for CI. It reads declared `dependsOn()` entries *and* each file's imports, so a deleted resource is caught even where nothing was declared. `--uses="App\..."` lists what depends on a class before you delete it.
