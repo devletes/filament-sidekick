@@ -85,7 +85,8 @@
         </span>
     </div>
 
-    <div class="sidekick-log" x-data="sidekickLog" x-on:scroll="onScroll" x-on:sidekick-jump-to-end.window="jump">
+    {{-- wire:navigate:scroll: the panel is @persist'ed, and moving an element between pages resets its scroll to the top; Livewire stores and restores it across the swap. --}}
+    <div class="sidekick-log" x-data="sidekickLog" x-on:scroll="onScroll" x-on:sidekick-jump-to-end.window="jump" wire:navigate:scroll>
         @if ($messages->isEmpty() && ! $activeRun)
             <x-filament::empty-state
                 :icon="$icons['assistant']"

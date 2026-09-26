@@ -107,6 +107,13 @@ document.addEventListener('alpine:init', () => {
                     this.toBottom();
                 }
             }).observe(this.$el);
+
+            // wire:navigate:scroll puts the log back where it was; if a message landed during the swap, follow it to the end.
+            document.addEventListener('livewire:navigated', () => {
+                if (this.stick) {
+                    this.toBottom();
+                }
+            });
         },
 
         toBottom() {
