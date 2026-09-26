@@ -4,6 +4,8 @@ namespace Devletes\Sidekick\Agents;
 
 use Devletes\Sidekick\Models\PendingAction;
 use Devletes\Sidekick\Support\ToolRegistry;
+use Laravel\Ai\Attributes\CacheInstructions;
+use Laravel\Ai\Attributes\CacheToolDefinitions;
 use Laravel\Ai\Concerns\RemembersConversations;
 use Laravel\Ai\Contracts\Agent;
 use Laravel\Ai\Contracts\Conversational;
@@ -12,6 +14,14 @@ use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
 
+/**
+ * The tool definitions and the instructions go out on every turn, and they are most of what a turn costs. Both
+ * are marked for the provider's prompt cache, so a conversation pays for them once and reads them back cheaply
+ * after that. The instructions end with what changes between turns (recent action outcomes, the host's live
+ * guidance); when that changes the tools are still read from the cache.
+ */
+#[CacheToolDefinitions]
+#[CacheInstructions]
 class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
 {
     use Promptable;

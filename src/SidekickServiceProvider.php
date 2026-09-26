@@ -12,12 +12,14 @@ use Devletes\Sidekick\Console\PruneAttachments;
 use Devletes\Sidekick\Console\ScaffoldCommand;
 use Devletes\Sidekick\Contracts\ActionResolver;
 use Devletes\Sidekick\Contracts\LimitProvider;
+use Devletes\Sidekick\Contracts\UsageExemptions;
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Livewire\ChatPanel;
 use Devletes\Sidekick\Storage\LeanConversationStore;
 use Devletes\Sidekick\Support\ConfigLimits;
 use Devletes\Sidekick\Support\DefaultSidekickContext;
 use Devletes\Sidekick\Support\MeteredUsage;
+use Devletes\Sidekick\Support\NoExemptions;
 use Devletes\Sidekick\Support\NullActionResolver;
 use Devletes\Sidekick\Support\Profiles;
 use Devletes\Sidekick\Support\SidekickContext;
@@ -46,6 +48,13 @@ class SidekickServiceProvider extends ServiceProvider
             LimitProvider::class,
             fn ($app) => $app->make(
                 config('sidekick.limits.provider') ?? ConfigLimits::class,
+            ),
+        );
+        // Nothing is exempt until the host says what is.
+        $this->app->singletonIf(
+            UsageExemptions::class,
+            fn ($app) => $app->make(
+                config('sidekick.limits.exemptions') ?? NoExemptions::class,
             ),
         );
         // MeteredUsage is inert until sidekick.limits.enabled, so this default changes nothing until asked.

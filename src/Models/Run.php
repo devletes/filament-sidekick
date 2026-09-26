@@ -28,6 +28,7 @@ class Run extends Model
             'activity' => 'array',
             'usage' => 'array',
             'denied' => 'boolean',
+            'metered' => 'boolean',
             'started_at' => 'datetime',
             'finished_at' => 'datetime',
         ];

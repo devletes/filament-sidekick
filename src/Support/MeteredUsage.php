@@ -3,6 +3,7 @@
 namespace Devletes\Sidekick\Support;
 
 use Devletes\Sidekick\Contracts\LimitProvider;
+use Devletes\Sidekick\Contracts\UsageExemptions;
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Models\Run;
 use Filament\Facades\Filament;
@@ -15,11 +16,15 @@ use Throwable;
  * whichever runs out first is the one the person is told about.
  *
  * Counted against completed and in-flight runs only: a turn the limiter itself denied never spent anything,
- * so it must not eat into the allowance and lock someone out on the strength of their own rejections.
+ * so it must not eat into the allowance and lock someone out on the strength of their own rejections. An
+ * exempt turn (Contracts\UsageExemptions) is never refused and never counted, though it is still logged.
  */
 class MeteredUsage implements UsageLimiter
 {
-    public function __construct(protected LimitProvider $limits) {}
+    public function __construct(
+        protected LimitProvider $limits,
+        protected UsageExemptions $exemptions,
+    ) {}
 
     public function check(Authenticatable $user, ?string $conversationId): ?string
     {
@@ -28,6 +33,10 @@ class MeteredUsage implements UsageLimiter
         }
 
         $tenant = $this->tenantKey();
+
+        if ($this->exemptions->exempt($user, $tenant)) {
+            return null;
+        }
 
         $tenantLimits = $this->limits->forTenant($tenant);
         $userLimits = $this->limits->forUser($user, $tenant)->clampTo($tenantLimits);
@@ -87,10 +96,10 @@ class MeteredUsage implements UsageLimiter
         return $this->scopedToTenant($tenant)->where('user_id', $user->getAuthIdentifier());
     }
 
-    /** Runs that actually cost something: denied ones never reached a provider. */
+    /** Runs that count: denied ones never reached a provider, and exempt ones were given away. */
     protected function spent(): Builder
     {
-        return Run::query()->where('denied', false);
+        return Run::query()->where('denied', false)->where('metered', true);
     }
 
     protected function tenantKey(): int|string|null

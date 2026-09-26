@@ -2,6 +2,7 @@
 
 namespace Devletes\Sidekick\Jobs;
 
+use Devletes\Sidekick\Contracts\UsageExemptions;
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Events\RunUpdated;
 use Devletes\Sidekick\Models\Attachment;
@@ -109,6 +110,9 @@ class RunChatTurn implements ShouldQueue
         $context->conversationId = $run->conversation_id;
         $context->runId = $run->id;
 
+        // Decided with the turn's own context live, as the limiter was: an exempt turn is logged but not counted.
+        $metered = ! app(UsageExemptions::class)->exempt($this->resolveUser($run), $run->tenant_id);
+
         try {
             $this->streamTurn($run);
 
@@ -118,8 +122,13 @@ class RunChatTurn implements ShouldQueue
                 'partial_content' => null,
                 'activity' => $this->activity,
                 'usage' => $this->usage,
-                // Denormalised so limits and insights can sum in SQL rather than decoding every row's JSON.
-                'tokens' => ($this->usage['prompt_tokens'] ?? 0) + ($this->usage['completion_tokens'] ?? 0),
+                // Denormalised so limits and insights can sum in SQL rather than decoding every row's JSON. What the
+                // provider processed: fresh input, output, and input written to the prompt cache. Cache reads are
+                // logged in `usage` but not counted, since they cost a fraction of fresh input.
+                'tokens' => ($this->usage['prompt_tokens'] ?? 0)
+                    + ($this->usage['completion_tokens'] ?? 0)
+                    + ($this->usage['cache_write_tokens'] ?? 0),
+                'metered' => $metered,
                 'navigate_to' => $context->navigateTo,
                 'finished_at' => now(),
             ]);
@@ -194,6 +203,8 @@ class RunChatTurn implements ShouldQueue
                 $this->usage = [
                     'prompt_tokens' => ($this->usage['prompt_tokens'] ?? 0) + $event->usage->promptTokens,
                     'completion_tokens' => ($this->usage['completion_tokens'] ?? 0) + $event->usage->completionTokens,
+                    'cache_write_tokens' => ($this->usage['cache_write_tokens'] ?? 0) + $event->usage->cacheWriteInputTokens,
+                    'cache_read_tokens' => ($this->usage['cache_read_tokens'] ?? 0) + $event->usage->cacheReadInputTokens,
                 ];
             }
         }

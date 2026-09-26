@@ -233,6 +233,11 @@ return [
         // tenant's plan and its per-user settings from your tables; the
         // clamping still applies, so you cannot accidentally oversell.
         'provider' => null,
+
+        // Contracts\UsageExemptions — turns that are free: never refused, still
+        // logged with their tokens, never counted against an allowance (your
+        // onboarding, say). The default exempts nothing.
+        'exemptions' => null,
     ],
 
     // Minutes before an unconfirmed action card expires.

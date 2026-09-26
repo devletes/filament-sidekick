@@ -158,3 +158,34 @@ it('treats a set of nulls as unlimited', function () {
         ->and(Limits::fromArray(['requests_per_day' => null])->isUnlimited())->toBeTrue()
         ->and(Limits::fromArray(['requests_per_day' => 5])->isUnlimited())->toBeFalse();
 });
+
+it('never refuses or counts an exempt turn, though it is still logged', function () {
+    config()->set('sidekick.limits.user.requests_per_day', 1);
+
+    // Say, onboarding: the host gives these away.
+    app()->instance(\Devletes\Sidekick\Contracts\UsageExemptions::class, new class implements \Devletes\Sidekick\Contracts\UsageExemptions
+    {
+        public bool $exempt = true;
+
+        public function exempt(\Illuminate\Contracts\Auth\Authenticatable $user, int|string|null $tenant): bool
+        {
+            return $this->exempt;
+        }
+    });
+    app()->forgetInstance(UsageLimiter::class);
+
+    meterRun(userId: 1)->forceFill(['metered' => false])->save();
+    meterRun(userId: 1)->forceFill(['metered' => false])->save();
+
+    expect(limiter()->check(FakeUser::make(), null))->toBeNull();
+
+    // Once turns count again, the free ones are still not held against anyone.
+    app(\Devletes\Sidekick\Contracts\UsageExemptions::class)->exempt = false;
+
+    expect(limiter()->check(FakeUser::make(), null))->toBeNull()
+        ->and(Run::query()->where('metered', false)->count())->toBe(2);
+
+    meterRun(userId: 1);
+
+    expect(limiter()->check(FakeUser::make(), null))->toContain('your assistant allowance for today');
+});

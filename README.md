@@ -514,6 +514,33 @@ class TenantPlanLimiter implements UsageLimiter
 
 Return `null` to allow, or a message to deny — shown to the user verbatim, with Retry suppressed. The check runs in the panel before a turn is created and again in the job, before any tokens are spent.
 
+### Free turns
+
+Some turns are worth giving away: your own onboarding, say. Bind `Contracts\UsageExemptions` and an exempt turn is never refused and never counted against an allowance, but it is still a run with its tokens, so the insights page and your own metering see everything:
+
+```php
+class OnboardingIsFree implements UsageExemptions
+{
+    public function exempt(Authenticatable $user, int|string|null $tenant): bool
+    {
+        return Onboarding::inProgressFor($user, $tenant);
+    }
+}
+```
+
+```php
+// config/sidekick.php
+'limits' => [
+    'exemptions' => \App\Sidekick\OnboardingIsFree::class,
+],
+```
+
+The run's `metered` column records the answer.
+
+### Prompt caching
+
+The chat agent marks its tool definitions and its instructions for the provider's prompt cache (`#[CacheToolDefinitions]`, `#[CacheInstructions]`), so a conversation pays for them once and reads them back at a fraction of the price. A run's `tokens`, the figure limits count, is fresh input, output and cache writes; cache reads are kept in its `usage` but not counted. PHP attributes are not inherited, so an agent class of your own that extends `ChatAgent` repeats both attributes to keep the cache.
+
 ## Theming
 
 Chrome comes from Filament's own Blade components, so the panel follows your panel's theme with no configuration. Everything else is a CSS custom property — declare any `--sidekick-*` on `body` in your theme stylesheet and it wins over the defaults. No PHP API needed.
@@ -567,6 +594,7 @@ SidekickPlugin::make()->icon(view('icons.my-logo'))
 | `Contracts\ActionResolver` | Named navigation targets → authorized URLs |
 | `Contracts\LimitProvider` | Where allowances come from — a tenant's plan, a user's settings |
 | `Contracts\UsageLimiter` | Replace the shipped limiter outright |
+| `Contracts\UsageExemptions` | Turns that are free: logged, never refused, never counted |
 | `Contracts\AlwaysOffered` | Keep a tool out of the catalog and directly in the prompt |
 | `Support\SidekickContext` | Stamp extra columns onto conversations and scope conversation queries |
 | `sidekick.jobs.run` | Subclass `RunChatTurn` for app concerns like metering |
