@@ -92,3 +92,41 @@ it('still respects the row limit when a generous budget is set', function () {
 
     expect(app(LeanConversationStore::class)->getLatestConversationMessages($id, 3))->toHaveCount(3);
 });
+
+it('replays a past reply with the tool calls that produced it, long results stubbed', function () {
+    config()->set('sidekick.history_token_budget', null);
+
+    $id = seedConversation(1);
+
+    DB::table(config('ai.conversations.tables.messages', 'agent_conversation_messages'))->insert([
+        'id' => (string) Str::uuid7(),
+        'conversation_id' => $id,
+        'user_id' => 1,
+        'agent' => 'test',
+        'role' => 'assistant',
+        'content' => 'Review the card, then Confirm to proceed or Cancel to abort.',
+        'attachments' => '[]',
+        'tool_calls' => json_encode([
+            ['id' => 'call_1', 'name' => 'Status', 'arguments' => [], 'result_id' => 'call_1'],
+            ['id' => 'call_2', 'name' => 'ProposeSkip', 'arguments' => ['step' => 'attendance'], 'result_id' => 'call_2'],
+        ]),
+        'tool_results' => json_encode([
+            ['id' => 'call_1', 'name' => 'Status', 'arguments' => [], 'result' => str_repeat('x', 5000)],
+            ['id' => 'call_2', 'name' => 'ProposeSkip', 'arguments' => ['step' => 'attendance'], 'result' => 'Card shown: Skip Attendance.'],
+        ]),
+        'usage' => '[]',
+        'meta' => '[]',
+        'created_at' => now()->addMinute(),
+        'updated_at' => now()->addMinute(),
+    ]);
+
+    $messages = app(LeanConversationStore::class)->getLatestConversationMessages($id, 10)->values();
+
+    // The user's line, the calls, their results, then the reply they explain.
+    expect($messages)->toHaveCount(4)
+        ->and($messages[1]->toolCalls->pluck('name')->all())->toBe(['Status', 'ProposeSkip'])
+        ->and($messages[2])->toBeInstanceOf(\Laravel\Ai\Messages\ToolResultMessage::class)
+        ->and($messages[2]->toolResults[0]->result)->toContain('Not kept in history')
+        ->and($messages[2]->toolResults[1]->result)->toBe('Card shown: Skip Attendance.')
+        ->and($messages[3]->content)->toBe('Review the card, then Confirm to proceed or Cancel to abort.');
+});
