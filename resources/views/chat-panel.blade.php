@@ -115,17 +115,16 @@
         @foreach ($timeline as $entry)
             @if ($entry['kind'] === 'action')
                 @php $action = $entry['model']; @endphp
+                @php
+                    $outcome = match ($action->status) {
+                        PendingAction::STATUS_EXECUTED => $action->result ?: __('sidekick::messages.outcome.done'),
+                        PendingAction::STATUS_FAILED => __('sidekick::messages.outcome.failed', ['reason' => $action->result]),
+                        PendingAction::STATUS_CANCELLED => $action->result ?: __('sidekick::messages.outcome.cancelled'),
+                        default => __('sidekick::messages.outcome.expired'),
+                    };
+                @endphp
                 <div class="sidekick-action-outcome sidekick-action-outcome-{{ $action->status }}" wire:key="sidekick-action-{{ $action->id }}">
-                    {{ $action->summary }} —
-                    @if ($action->status === PendingAction::STATUS_EXECUTED)
-                        {{ $action->result ?: __('sidekick::messages.outcome.done') }}
-                    @elseif ($action->status === PendingAction::STATUS_FAILED)
-                        {{ __('sidekick::messages.outcome.failed', ['reason' => $action->result]) }}
-                    @elseif ($action->status === PendingAction::STATUS_CANCELLED)
-                        {{ $action->result ?: __('sidekick::messages.outcome.cancelled') }}
-                    @else
-                        {{ __('sidekick::messages.outcome.expired') }}
-                    @endif
+                    {{ __('sidekick::messages.outcome.line', ['summary' => $action->summary, 'outcome' => $outcome]) }}
                 </div>
                 @continue
             @endif

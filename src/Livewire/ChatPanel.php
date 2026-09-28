@@ -499,7 +499,15 @@ class ChatPanel extends Component
         $this->actionModalId = $activeAction?->rendersInModal() ? $activeAction->id : null;
         $this->actionModalPrimed = true;
 
-        // One chronological stream: outcome lines sort where their action was proposed, not clumped after the messages.
+        // One chronological stream: outcome lines sort with the turn that proposed them, not clumped after the messages.
+        // A turn's messages are only stored when it ends, after the card was proposed, so a line sorts from the end
+        // of its run: after that turn's prompt and reply rather than above the prompt.
+        $runEnds = Run::query()
+            ->whereKey($pendingActions->pluck('run_id')->filter()->unique()->values())
+            ->whereNotNull('finished_at')
+            ->get(['id', 'finished_at'])
+            ->mapWithKeys(fn (Run $run) => [$run->id => $run->finished_at?->getTimestamp()]);
+
         $timeline = $messages
             ->map(fn ($message) => [
                 'kind' => 'message',
@@ -511,7 +519,7 @@ class ChatPanel extends Component
                     ->reject(fn ($action) => $action->isConfirmable())
                     ->map(fn ($action) => [
                         'kind' => 'action',
-                        'sort' => sprintf('%012d.1.%s', $action->created_at?->getTimestamp() ?? 0, $action->id),
+                        'sort' => sprintf('%012d.1.%s', max($action->created_at?->getTimestamp() ?? 0, $runEnds[$action->run_id] ?? 0), $action->id),
                         'model' => $action,
                     ])
             )

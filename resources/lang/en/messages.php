@@ -48,6 +48,8 @@ return [
     ],
 
     'outcome' => [
+        // The line under a card once it is settled: what it was, then what happened.
+        'line' => ':summary — :outcome',
         'done' => 'done',
         'failed' => 'failed: :reason',
         'cancelled' => 'cancelled — nothing was done.',
