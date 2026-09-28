@@ -159,8 +159,11 @@ class RunChatTurn implements ShouldQueue
 
         $agent->continue($run->conversation_id, $this->resolveUser($run));
 
+        // What changes between turns rides on the message, so the instructions stay cacheable.
+        $context = method_exists($agent, 'turnContext') ? self::contextNote($agent->turnContext()) : '';
+
         // Attachments ride as a metadata note on the prompt — file contents are never uploaded to the provider.
-        $prompt = $this->composeModelPrompt($run);
+        $prompt = $this->composeModelPrompt($run, $context);
 
         $stream = $agent->stream(
             $prompt,
@@ -210,15 +213,24 @@ class RunChatTurn implements ShouldQueue
         }
 
         $this->repairStoredReply($run);
-        $this->repairStoredUserMessage($run, $prompt);
+        $this->repairStoredUserMessage($run, $prompt, $context);
     }
 
-    /** Swap the composed prompt back for the user's clean text and record attachment metadata on the message row. */
-    protected function repairStoredUserMessage(Run $run, string $sentPrompt): void
+    /** The note the app's turn context is sent in; stored as it is, so the history replays it unchanged. */
+    public static function contextNote(string $context): string
+    {
+        return trim($context) === '' ? '' : "[App context when this message was sent:\n".trim($context).']';
+    }
+
+    /**
+     * Swap the composed prompt back for the user's clean text, which is what the panel shows, keeping the
+     * context note and any attachment metadata beside it on the row for the history to replay.
+     */
+    protected function repairStoredUserMessage(Run $run, string $sentPrompt, string $context): void
     {
         $attachments = $this->attachmentRows($run);
 
-        if ($attachments->isEmpty()) {
+        if ($attachments->isEmpty() && $context === '') {
             return;
         }
 
@@ -232,24 +244,21 @@ class RunChatTurn implements ShouldQueue
             return;
         }
 
-        $message->update([
+        $message->update(array_filter([
             'content' => $run->prompt,
-            'attachments' => $attachments
+            'context' => $context === '' ? null : $context,
+            'attachments' => $attachments->isEmpty() ? null : $attachments
                 ->map(fn (Attachment $attachment): array => $attachment->toMetadata())
                 ->values()
                 ->all(),
-        ]);
+        ], fn (mixed $value, string $key): bool => $key === 'content' || $value !== null, ARRAY_FILTER_USE_BOTH));
     }
 
-    protected function composeModelPrompt(Run $run): string
+    protected function composeModelPrompt(Run $run, string $context = ''): string
     {
-        $note = $this->attachmentNote($run);
-
-        if ($note === '') {
-            return $run->prompt;
-        }
-
-        return trim($run->prompt) === '' ? $note : $run->prompt."\n\n".$note;
+        return collect([$run->prompt, $this->attachmentNote($run), $context])
+            ->filter(fn (string $part): bool => trim($part) !== '')
+            ->join("\n\n");
     }
 
     protected function attachmentNote(Run $run): string

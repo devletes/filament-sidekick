@@ -4,6 +4,7 @@ namespace Devletes\Sidekick\Support;
 
 use Devletes\Sidekick\Contracts\AlwaysOffered;
 use Devletes\Sidekick\Contracts\ChatTool;
+use Devletes\Sidekick\Contracts\ProvidesTurnContext;
 use Devletes\Sidekick\Tools\ListTools;
 use Devletes\Sidekick\Tools\RunTool;
 use Filament\Facades\Filament;
@@ -149,6 +150,17 @@ class ToolRegistry
         return $fragments->isEmpty()
             ? ''
             : "Tool guidance:\n".$fragments->join("\n\n");
+    }
+
+    /** What the offered tools have to say about this turn (Contracts\ProvidesTurnContext), in registry order. */
+    public function turnContextFor(?Authenticatable $user): string
+    {
+        return collect($this->authorizedFor($user))
+            ->filter(fn (ChatTool $tool): bool => $tool instanceof ProvidesTurnContext)
+            ->map(fn (ProvidesTurnContext $tool): string => trim((string) $tool->turnContext()))
+            ->filter()
+            ->unique()
+            ->join("\n\n");
     }
 
     /**

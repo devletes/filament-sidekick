@@ -49,9 +49,10 @@ class LeanConversationStore extends DatabaseConversationStore
                 if ($record->role === 'user') {
                     $note = $this->attachmentNote($record->attachments ?? null);
 
-                    if ($note !== '') {
-                        $content = trim($content) === '' ? $note : $content."\n\n".$note;
-                    }
+                    // The app's context note goes back last, as it was sent, so the replayed message matches the cached one.
+                    $content = collect([$content, $note, (string) ($record->context ?? '')])
+                        ->filter(fn (string $part): bool => trim($part) !== '')
+                        ->join("\n\n");
 
                     return trim($content) === '' ? [] : [new Message('user', $content)];
                 }
@@ -108,7 +109,12 @@ class LeanConversationStore extends DatabaseConversationStore
 
     /**
      * A row cap alone says nothing about prompt size — ten pasted logs dwarf ten "thanks". When a token budget
-     * is set, drop whole messages newest-first-inwards until the estimate fits.
+     * is set, the history is cut to fit it.
+     *
+     * The cut moves in steps, not a message at a time. The conversation is divided from its start into pages of
+     * half the budget, and the history starts at the earliest page from which the rest fits. Where it starts
+     * therefore stays put for several turns, and a history that starts in the same place is read from the prompt
+     * cache; a window sliding one message per turn would change its start, and miss the cache, on every turn.
      *
      * @param  Collection<int, Message>  $messages
      * @return Collection<int, Message>
@@ -122,27 +128,54 @@ class LeanConversationStore extends DatabaseConversationStore
         }
 
         $budget = max(0, (int) $budget);
+        $messages = $messages->values();
+        $costs = $messages->map(fn (Message $message): int => $this->costOf($message))->all();
+        $page = max(1, intdiv($budget, 2));
+
+        // Where each page starts: a new one opens whenever the current one would run past half the budget.
+        $starts = [0];
+        $filled = 0;
+
+        foreach ($costs as $index => $cost) {
+            if ($index > 0 && $filled + $cost > $page) {
+                $starts[] = $index;
+                $filled = 0;
+            }
+
+            $filled += $cost;
+        }
+
+        foreach ($starts as $start) {
+            if (array_sum(array_slice($costs, $start)) <= $budget) {
+                return $messages->slice($start)->values();
+            }
+        }
+
+        // The last page alone is over budget: keep what fits, newest first, and always the latest message, since a
+        // single oversized turn should shrink history, not erase it.
         $kept = [];
         $spent = 0;
 
-        foreach ($messages->reverse() as $message) {
-            $cost = TokenBudget::estimate((string) $message->content
-                .match (true) {
-                    $message instanceof ToolResultMessage => json_encode($message->toolResults->all()),
-                    $message instanceof AssistantMessage && $message->toolCalls->isNotEmpty() => json_encode($message->toolCalls->all()),
-                    default => '',
-                });
-
-            // Always keep the most recent message: a single oversized turn should shrink history, not erase it.
-            if ($kept !== [] && $spent + $cost > $budget) {
+        foreach (array_reverse(array_keys($costs)) as $index) {
+            if ($kept !== [] && $spent + $costs[$index] > $budget) {
                 break;
             }
 
-            $kept[] = $message;
-            $spent += $cost;
+            $kept[] = $messages[$index];
+            $spent += $costs[$index];
         }
 
         return collect(array_reverse($kept));
+    }
+
+    protected function costOf(Message $message): int
+    {
+        return TokenBudget::estimate((string) $message->content
+            .match (true) {
+                $message instanceof ToolResultMessage => json_encode($message->toolResults->all()),
+                $message instanceof AssistantMessage && $message->toolCalls->isNotEmpty() => json_encode($message->toolCalls->all()),
+                default => '',
+            });
     }
 
     protected function attachmentNote(mixed $attachments): string

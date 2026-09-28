@@ -45,9 +45,16 @@ return [
     // Optional ceiling on the SIZE of that history, in approximate tokens.
     // A row cap says nothing about prompt size — ten pasted stack traces cost
     // far more than ten "thanks" — so set this to bound spend predictably.
-    // Rows are dropped oldest-first until the estimate fits; the newest
+    // The start of the history moves in steps of half the budget, so it
+    // stays put for several turns and is read from the prompt cache; the
+    // history runs between half the budget and all of it. The newest
     // message is always kept. null → rows are the only limit.
     'history_token_budget' => null,
+
+    // Anthropic only: cache the conversation as well as the tools and the
+    // instructions, so each step of a turn and the next turn read what was
+    // already sent instead of paying for it again.
+    'cache_history' => true,
 
     // Bytes per token for that estimate. No PHP tokeniser matches every
     // provider, so this is deliberately approximate — budget with headroom
