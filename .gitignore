@@ -2,6 +2,7 @@
 /node_modules/
 /workbench/storage/
 composer.lock
+package-lock.json
 .phpunit.result.cache
 .phpunit.cache
 .DS_Store
