@@ -12,9 +12,6 @@ return new class extends Migration
 
         Schema::table($messages, function (Blueprint $table) use ($messages) {
             if (! Schema::hasColumn($messages, 'context')) {
-                // The app's note sent with a user message (Contracts\ProvidesTurnContext, recent action outcomes).
-                // Kept apart from the content so the panel never shows it, and replayed with the message so the
-                // history the provider sees is byte for byte what it saw, which is what lets it be read from the cache.
                 $table->text('context')->nullable();
             }
         });

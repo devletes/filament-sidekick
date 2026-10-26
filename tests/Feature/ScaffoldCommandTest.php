@@ -44,9 +44,7 @@ it('scaffolds a search tool and a resolver from the configured resources', funct
 });
 
 it('enumerates resources from the registered Filament panels when no allowlist is set', function () {
-    // Panel registration is deferred onto PanelRegistry's resolving hook, so
-    // the panel provider must register before FilamentServiceProvider first
-    // resolves the registry.
+    // Panel providers must register before FilamentServiceProvider first resolves the PanelRegistry.
     $this->app->register(SupportServiceProvider::class);
     $this->app->register(TestPanelProvider::class);
     $this->app->register(FilamentServiceProvider::class);

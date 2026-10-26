@@ -51,7 +51,6 @@ it('offers a way back into a modal card the user reloaded away from', function (
 
     $panel = Livewire::test(ChatPanel::class)->set('conversationId', $conversationId);
 
-    // A page load must not spring the modal open by itself; the dock offers the way back in.
     $panel->assertSet('actionModalOpen', false)
         ->assertSee('A confirmation is waiting')
         ->assertSee('Review it');

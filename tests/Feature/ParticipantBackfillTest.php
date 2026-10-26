@@ -25,12 +25,12 @@ function legacyConversation(int $userId): string
         'id' => (string) Str::uuid7(),
         'conversation_id' => $id,
         'user_id' => $userId,
-        'agent' => 'App\\Agents\\Nyra',
+        'agent' => 'App\\Agents\\Assistant',
         'role' => 'user',
         'content' => 'hello',
         'attachments' => '[]',
-        'tool_calls' => '[]',
-        'tool_results' => '[]',
+        'steps' => '[]',
+        'status' => 'completed',
         'usage' => '[]',
         'meta' => '[]',
         'created_at' => now(),
@@ -40,9 +40,9 @@ function legacyConversation(int $userId): string
     return $id;
 }
 
-it('adds the columns laravel/ai 0.10+ writes to both conversation tables', function () {
+it('adds the columns laravel/ai writes to both conversation tables', function () {
     expect(Schema::hasColumns('agent_conversations', ['participant_type', 'participant_id']))->toBeTrue()
-        ->and(Schema::hasColumns('agent_conversation_messages', ['participant_type', 'participant_id', 'approval_state']))->toBeTrue()
+        ->and(Schema::hasColumns('agent_conversation_messages', ['participant_type', 'participant_id', 'steps', 'status']))->toBeTrue()
         // user_id stays: the package's own scopes and insights read it.
         ->and(Schema::hasColumn('agent_conversations', 'user_id'))->toBeTrue();
 });
@@ -50,7 +50,7 @@ it('adds the columns laravel/ai 0.10+ writes to both conversation tables', funct
 it('backfills the participant pair from user_id on rows that predate the columns', function () {
     $id = legacyConversation(7);
 
-    // Re-running the migration is idempotent: the columns already exist, so only the backfill runs.
+    // Re-run: the columns already exist, so only the backfill runs.
     (require __DIR__.'/../../database/migrations/2026_09_05_000100_add_participants_to_conversation_tables.php')->up();
 
     $expectedType = (new (config('auth.providers.users.model')))->getMorphClass();
@@ -61,8 +61,7 @@ it('backfills the participant pair from user_id on rows that predate the columns
     expect($conversation->participant_type)->toBe($expectedType)
         ->and((int) $conversation->participant_id)->toBe(7)
         ->and($message->participant_type)->toBe($expectedType)
-        ->and((int) $message->participant_id)->toBe(7)
-        ->and($message->approval_state)->toBeNull();
+        ->and((int) $message->participant_id)->toBe(7);
 });
 
 it('leaves rows that already carry a participant alone', function () {

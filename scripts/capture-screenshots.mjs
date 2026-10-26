@@ -11,18 +11,19 @@ const outDir = resolve(projectRoot, 'docs/images');
 
 const baseUrl = process.env.WORKBENCH_URL ?? 'http://127.0.0.1:8770';
 
-// One seeded user per panel state (see workbench/database/seeders/DatabaseSeeder.php).
-// `resume` clicks "Resume last conversation" so the seeded thread is on screen.
+// One seeded user per panel state; `resume` reopens that user's seeded thread.
 const targets = [
-    { file: 'panel', user: 'aria@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 660 },
-    { file: 'empty_state', user: 'mateo@example.com', path: '/admin', selector: '.sidekick-card', isolate: true, height: 600 },
-    { file: 'confirm_card', user: 'hana@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
-    { file: 'action_outcome', user: 'noor@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
-    { file: 'modal_dock', user: 'ivan@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
-    { file: 'modal_card', user: 'ivan@example.com', path: '/admin', viewport: true, resume: true, openModal: true },
-    { file: 'streaming', user: 'curt@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 600 },
-    { file: 'layout', user: 'aria@example.com', path: '/admin/leave-requests', viewport: true, resume: true },
-    { file: 'closed', user: 'aria@example.com', path: '/admin/leave-requests', viewport: true, open: false },
+    { file: 'panel', user: 'salman@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 660 },
+    { file: 'empty_state', user: 'salman.new@example.com', path: '/admin', selector: '.sidekick-card', isolate: true, height: 600 },
+    { file: 'confirm_card', user: 'salman.card@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
+    { file: 'action_outcome', user: 'salman.done@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
+    { file: 'modal_dock', user: 'salman.modal@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
+    { file: 'modal_card', user: 'salman.modal@example.com', path: '/admin', viewport: true, resume: true, openModal: true },
+    { file: 'streaming', user: 'salman.streaming@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 600 },
+    { file: 'layout', user: 'salman@example.com', path: '/admin/orders', viewport: true, resume: true },
+    { file: 'closed', user: 'salman@example.com', path: '/admin/orders', viewport: true, open: false },
+    // Charts read their theme colours once, when drawn, so this page is reloaded in each mode.
+    { file: 'insights', user: 'salman@example.com', path: '/admin/sidekick-insights', viewport: true, fullPage: true, open: false, reloadPerMode: true },
 ];
 
 const modes = ['light', 'dark'];
@@ -42,14 +43,11 @@ async function setColorMode(page, mode) {
     }, mode);
 }
 
-// The workbench exposes a local-only login route: a run needs six different
-// users, which the real login form throttles.
 async function login(page, email) {
     await page.goto(`${baseUrl}/dev-login/${encodeURIComponent(email)}`);
     await page.waitForURL((url) => url.toString().includes('/admin'), { timeout: 15000 });
 }
 
-// One session per user, reused across that user's targets.
 const authStates = new Map();
 
 async function stateFor(browser, email) {
@@ -102,8 +100,7 @@ async function main() {
             await page.waitForTimeout(500);
         }
 
-        // Keep the page's own chrome out of the padding band, so the border
-        // around the panel is flat page background like the sibling packages.
+        // Hide the page chrome so the padding band around the panel is flat background.
         if (target.isolate) {
             await page.addStyleTag({
                 content: '.fi-topbar, .fi-main, .fi-sidebar { visibility: hidden !important; }',
@@ -112,12 +109,19 @@ async function main() {
 
         for (const mode of modes) {
             await setColorMode(page, mode);
+
+            if (target.reloadPerMode) {
+                await page.reload();
+                await page.waitForLoadState('networkidle');
+                await page.waitForTimeout(800);
+            }
+
             await page.waitForTimeout(400);
 
             const outPath = resolve(outDir, `${target.file}_${mode}.png`);
 
             if (target.viewport) {
-                await page.screenshot({ path: outPath });
+                await page.screenshot({ path: outPath, fullPage: target.fullPage === true });
             } else {
                 const box = await page.locator(target.selector).first().boundingBox();
                 await page.screenshot({

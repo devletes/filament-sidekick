@@ -50,13 +50,11 @@ class PendingAction extends Model
         return $this->confirmation === ConfirmationMode::Modal;
     }
 
-    /** The confirm card should render a file field for this action. */
     public function acceptsUpload(): bool
     {
         return is_array($this->upload) && $this->upload !== [];
     }
 
-    /** Confirm must be blocked until at least one file is attached. */
     public function requiresUpload(): bool
     {
         return $this->acceptsUpload()

@@ -15,7 +15,6 @@ it('offers panel-bound tools only inside their panel', function () {
     registerFilamentPanels($this->app);
     config()->set('sidekick.tools', [PanelBoundTool::class, EchoTool::class]);
 
-    // No panel context: only '*' tools.
     $offered = fn (): array => array_map(
         fn ($tool): string => $tool::class,
         app(ToolRegistry::class)->authorizedFor(FakeUser::make()),
@@ -99,7 +98,6 @@ it('clears a previous job\'s tenant instead of letting it bleed into the next tu
     expect(Filament::getTenant())->toBeNull()
         ->and(Filament::getCurrentPanel()?->getId())->toBe('testing');
 
-    // ...and one dispatched outside any panel clears the panel too.
     PanelContext::apply(null, null);
 
     expect(Filament::getTenant())->toBeNull()

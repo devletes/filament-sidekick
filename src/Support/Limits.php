@@ -2,10 +2,7 @@
 
 namespace Devletes\Sidekick\Support;
 
-/**
- * One party's allowance. Every field is nullable and null means unlimited, so a partially configured set
- * constrains only what it names.
- */
+/** A null field means unlimited. */
 final class Limits
 {
     public function __construct(
@@ -45,11 +42,7 @@ final class Limits
             && $this->tokensPerMonth === null;
     }
 
-    /**
-     * Hold this allowance under a ceiling. A tenant hands out allowances from its own, so it can be stricter
-     * than the platform allows but never more generous — an unset ceiling stays unset, and an unset field
-     * inherits the ceiling's.
-     */
+    /** May be stricter than the ceiling, never more generous; an unset field inherits the ceiling's. */
     public function clampTo(self $ceiling): self
     {
         $lower = static fn (?int $mine, ?int $limit): ?int => match (true) {

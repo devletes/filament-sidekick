@@ -59,7 +59,6 @@ it('executes a confirmed action exactly once under concurrent clicks', function 
 
     $this->actingAs($user);
 
-    // Two panel instances on the same conversation, both showing the card.
     $confirm = fn () => Livewire::test(ChatPanel::class)
         ->set('conversationId', $conversationId)
         ->call('confirmAction', $action->id);

@@ -12,7 +12,7 @@ use Laravel\Ai\Tools\Request;
 use Laravel\Ai\Tools\ToolNameResolver;
 use Throwable;
 
-/** Catalog mode: dispatches a tool the model found via ListTools, re-proving authorization rather than trusting the name. */
+/** Catalog mode: dispatches a tool the model found via ListTools. */
 class RunTool extends ChatToolBase implements AlwaysOffered
 {
     public const NAME = 'RunTool';
@@ -38,7 +38,7 @@ class RunTool extends ChatToolBase implements AlwaysOffered
 
     public function label(): string
     {
-        // Only ever seen if the inner tool cannot be resolved; the panel normally shows the inner tool's own label.
+        // Only seen if the inner tool cannot be resolved; the panel normally shows the inner tool's label.
         return __('sidekick::messages.activity.running');
     }
 
@@ -79,10 +79,7 @@ class RunTool extends ChatToolBase implements AlwaysOffered
         }
     }
 
-    /**
-     * Resolve by name from the caller's own authorized set. The model can name anything, so the catalog is
-     * never the authority — this lookup re-applies panels() and authorize() for the acting user.
-     */
+    /** The model can name anything, so resolve only from the acting user's authorized set. */
     protected function resolve(string $name): ?ChatTool
     {
         foreach (app(ToolRegistry::class)->catalogueableFor($this->user) as $tool) {

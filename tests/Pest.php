@@ -7,8 +7,7 @@ use Filament\FilamentServiceProvider;
 
 uses(TestCase::class)->in(__DIR__);
 
-// Panel providers must register before FilamentServiceProvider first resolves
-// the PanelRegistry (panel registration rides its resolving hook).
+// Panel providers must register before FilamentServiceProvider first resolves the PanelRegistry.
 function registerFilamentPanels($app): void
 {
     $app->register(TestPanelProvider::class);

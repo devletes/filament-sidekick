@@ -46,7 +46,6 @@ it('leaves no hardcoded user-facing strings in the panel views', function () {
     foreach (glob(__DIR__.'/../../resources/views/**/*.blade.php') + glob(__DIR__.'/../../resources/views/*.blade.php') as $file) {
         $contents = file_get_contents($file);
 
-        // Prose in a label/heading/placeholder/tooltip attribute should always be a translation call.
         preg_match_all('/\s(?:label|heading|description|tooltip|placeholder|aria-label)="([A-Z][a-z][^"{]*)"/', $contents, $matches);
 
         foreach ($matches[1] ?? [] as $literal) {

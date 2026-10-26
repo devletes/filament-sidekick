@@ -4,7 +4,7 @@ namespace Devletes\Sidekick\Contracts;
 
 use Illuminate\Contracts\Auth\Authenticatable;
 
-/** Host-app seam: turns a named target (+ optional record) into an authorized URL; return null for unknown/unauthorized — never throw into the render path. */
+/** Turns a named target (+ optional record) into an authorized URL; return null, never throw, when unknown or unauthorized. */
 interface ActionResolver
 {
     public function resolve(string $target, ?string $record, Authenticatable $user): ?string;

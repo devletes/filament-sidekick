@@ -11,9 +11,9 @@ class ConversationMessage extends BaseConversationMessage
 
     protected $keyType = 'string';
 
-    /** The base model already casts tool_calls to array; this just guards null. */
+    /** Every step's calls, in order; the base model collapses them out of `steps`. */
     public function decodedToolCalls(): array
     {
-        return $this->tool_calls ?? [];
+        return $this->tool_calls;
     }
 }

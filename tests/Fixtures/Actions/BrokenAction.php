@@ -6,7 +6,6 @@ use Devletes\Sidekick\Support\SidekickAction;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 
-/** Stands in for an action whose model was deleted: it must stop being both proposable and confirmable. */
 class BrokenAction extends SidekickAction
 {
     public const MISSING = 'Devletes\Sidekick\Tests\Fixtures\DeletedModel';

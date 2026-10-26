@@ -27,14 +27,12 @@ class RecentRuns extends TableWidget
                     ->since()
                     ->tooltip(fn (Run $run): string => (string) $run->created_at),
 
-                // Only where the page spans tenants: a single-tenant app has no tenant to name, and on a
-                // tenant panel every row is the same one.
+                // Only where the page spans tenants; otherwise every row would name the same one.
                 Insights::spansTenants() ? $this->tenantColumn() : null,
 
                 $this->userColumn(),
 
-                // Off by default: a prompt is the person's own words, and an operator dashboard is not
-                // automatically the right place to read them.
+                // Off by default: prompts are the person's own words, not operator dashboard material.
                 config('sidekick.insights.show_prompts', false)
                     ? TextColumn::make('prompt')
                         ->label(__('sidekick::messages.insights.prompt'))
@@ -67,7 +65,6 @@ class RecentRuns extends TableWidget
             ])));
     }
 
-    /** Override to render a tenant however you like — an avatar, a link to the account. */
     protected function tenantColumn(): Column
     {
         return TextColumn::make('tenant_id')
@@ -81,7 +78,6 @@ class RecentRuns extends TableWidget
             ->toggleable();
     }
 
-    /** Override to render a person however you like — the same component your app uses everywhere else. */
     protected function userColumn(): Column
     {
         return TextColumn::make('user_id')
@@ -93,7 +89,6 @@ class RecentRuns extends TableWidget
             });
     }
 
-    /** The tools a run actually called, by their human labels rather than class names. */
     protected function toolsUsed(Run $run): string
     {
         $registry = app(ToolRegistry::class);

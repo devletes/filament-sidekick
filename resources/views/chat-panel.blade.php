@@ -20,8 +20,7 @@
 
         <span class="sidekick-header-actions">
             @if ($historyEnabled)
-                {{-- Teleported and shifted: the panel's own card is overflow-hidden and positioned, so an
-                     in-place dropdown is clipped by it and anchored against the wrong containing block. --}}
+                {{-- Teleported: the overflow-hidden, positioned card would clip and misanchor an in-place dropdown. --}}
                 <x-filament::dropdown
                     placement="bottom-end"
                     width="xs"
@@ -85,7 +84,7 @@
         </span>
     </div>
 
-    {{-- wire:navigate:scroll: the panel is @persist'ed, and moving an element between pages resets its scroll to the top; Livewire stores and restores it across the swap. --}}
+    {{-- wire:navigate:scroll: the @persist'ed panel would otherwise lose its scroll position on each page swap. --}}
     <div class="sidekick-log" x-data="sidekickLog" x-on:scroll="onScroll" x-on:sidekick-jump-to-end.window="jump" wire:navigate:scroll>
         @if ($messages->isEmpty() && ! $activeRun)
             <x-filament::empty-state
@@ -238,7 +237,6 @@
     </div>
 
     @if ($activeAction && ! $activeAction->rendersInModal())
-        {{-- Inline: the card takes the composer's place until it is answered. --}}
         <div class="sidekick-action-dock" wire:key="sidekick-dock-{{ $activeAction->id }}">
             <div class="sidekick-action-card">
                 @include('sidekick::partials.action-card')
@@ -281,7 +279,7 @@
             @endif
 
             <div class="sidekick-composer-row">
-                {{-- Deliberately NOT disabled mid-run: disabling a focused element drops focus to <body>. send() ignores mid-run submits server-side. --}}
+                {{-- Not disabled mid-run (that drops focus to <body>); send() ignores mid-run submits. --}}
                 <x-filament::input.wrapper class="sidekick-composer-field fi-fo-textarea">
                     <textarea
                         wire:model="draft"
@@ -297,7 +295,6 @@
 
                 <div class="sidekick-composer-buttons">
                     @if ($attachmentsEnabled)
-                        {{-- Rendered as a <label> for the hidden input: native file dialog, zero JS, stock button chrome. --}}
                         <x-filament::button
                             tag="label"
                             for="sidekick-uploads-{{ $this->getId() }}"
@@ -330,7 +327,7 @@
     @endif
 
     @if ($activeAction && $activeAction->rendersInModal())
-        {{-- Not dismissible: answering it is the only way out. A reload still escapes it, which is what the dock link is for. --}}
+        {{-- Not dismissible; a reload still escapes it, which the dock link covers. --}}
         <x-filament::modal
             :id="$actionModalId"
             teleport="body"

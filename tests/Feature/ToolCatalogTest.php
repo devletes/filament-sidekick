@@ -72,7 +72,6 @@ it('keeps the built-ins direct so their calls stay readable afterwards', functio
     expect(offeredNames())->toContain('Navigate', 'PresentActions')
         ->and(collect($offered)->first(fn ($t) => $t instanceof Navigate))->not->toBeNull()
         ->and(collect($offered)->first(fn ($t) => $t instanceof PresentActions))->not->toBeNull()
-        // ...and they are not duplicated inside the catalog.
         ->and(array_column(app(ToolRegistry::class)->catalogFor(FakeUser::make()), 'name'))
         ->not->toContain('Navigate');
 });
@@ -177,9 +176,7 @@ it('resolves a RunTool call back to the tool it actually ran', function () {
     expect(ToolRegistry::ranTool('RunTool', ['tool' => 'EchoTool']))->toBe('EchoTool')
         // Providers hand arguments back as a JSON string in some transports.
         ->and(ToolRegistry::ranTool('RunTool', '{"tool":"EchoTool"}'))->toBe('EchoTool')
-        // A direct call is already the answer.
         ->and(ToolRegistry::ranTool('EchoTool', []))->toBe('EchoTool')
-        // Nothing usable inside: fall back to the wrapper rather than inventing a name.
         ->and(ToolRegistry::ranTool('RunTool', []))->toBe('RunTool')
         ->and(ToolRegistry::ranTool('RunTool', ['tool' => '  ']))->toBe('RunTool');
 });
@@ -199,7 +196,6 @@ it('still only proposes a write when the action is reached through the catalog',
     config()->set('sidekick.tool_catalog.enabled', true);
     CreateNote::$created = [];
 
-    // The proposal tool is catalogued like any other, under its Propose{Type} name.
     expect(array_column(app(ToolRegistry::class)->catalogFor(FakeUser::make()), 'name'))
         ->toBe(['ProposeCreateNote']);
 
@@ -211,7 +207,6 @@ it('still only proposes a write when the action is reached through the catalog',
     $response = json_decode($result, true);
 
     expect($response['proposed'])->toBeTrue()
-        // The indirection changes nothing that matters: a card is waiting and nothing was written.
         ->and(PendingAction::query()->findOrFail($response['action_id'])->status)
         ->toBe(PendingAction::STATUS_PROPOSED)
         ->and(CreateNote::$created)->toBe([]);
@@ -235,6 +230,5 @@ it('keeps tool guidance in the system prompt even when the tools are behind the 
     config()->set('sidekick.tools', [AdvisedTool::class]);
     config()->set('sidekick.tool_catalog.enabled', true);
 
-    // Safety guidance has to arrive before the model chooses, not after it fetches the catalog.
     expect(app(ToolRegistry::class)->instructionsFor(FakeUser::make()))->toContain('Tool guidance:');
 });

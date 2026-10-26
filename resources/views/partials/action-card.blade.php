@@ -10,7 +10,6 @@
 </dl>
 
 @if (($activeAction->acceptsUpload() && $attachmentsEnabled) || $cardPayloadAttachments->isNotEmpty())
-    {{-- One "Attachments" set: files the proposal already references (from chat) plus files added here; both removable. --}}
     <div class="sidekick-card-upload">
         <p class="sidekick-card-upload-label">
             {{ __('sidekick::messages.attachments.heading') }}

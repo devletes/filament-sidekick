@@ -15,7 +15,6 @@ return new class extends Migration
         }
 
         Schema::table($conversations, function (Blueprint $table) {
-            // Which assistant profile the conversation belongs to (null = base).
             $table->string('profile', 48)->nullable();
         });
     }

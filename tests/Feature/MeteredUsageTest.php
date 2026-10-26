@@ -1,10 +1,12 @@
 <?php
 
 use Devletes\Sidekick\Contracts\LimitProvider;
+use Devletes\Sidekick\Contracts\UsageExemptions;
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Models\Run;
 use Devletes\Sidekick\Support\Limits;
 use Devletes\Sidekick\Tests\Fixtures\FakeUser;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
 
 beforeEach(function () {
@@ -12,7 +14,6 @@ beforeEach(function () {
     config()->set('sidekick.limits.enabled', true);
 });
 
-/** A finished run for a user in a tenant, costing $tokens. */
 function meterRun(int $userId = 1, ?string $tenant = null, int $tokens = 0, bool $denied = false, ?string $at = null): Run
 {
     return Run::query()->create([
@@ -66,7 +67,6 @@ it('denies on tokens as well as request count', function () {
 it('never counts a denied run against the allowance', function () {
     config()->set('sidekick.limits.user.requests_per_day', 2);
 
-    // Rejections would otherwise compound: being refused once would help refuse you again.
     meterRun(userId: 1, denied: true);
     meterRun(userId: 1, denied: true);
 
@@ -93,7 +93,6 @@ it('reports the tenant running out before the user does', function () {
     config()->set('sidekick.limits.tenant.requests_per_day', 2);
     config()->set('sidekick.limits.user.requests_per_day', 10);
 
-    // Two different people, one shared tenant allowance.
     meterRun(userId: 1);
     meterRun(userId: 2);
 
@@ -101,7 +100,6 @@ it('reports the tenant running out before the user does', function () {
 });
 
 it('clamps a tenant-set user allowance to the platform\'s tenant allowance', function () {
-    // The platform sold this tenant 2 requests a day; the tenant tried to hand one user 50.
     app()->bind(LimitProvider::class, fn () => new class implements LimitProvider
     {
         public function forTenant(int|string|null $tenant): Limits
@@ -118,7 +116,6 @@ it('clamps a tenant-set user allowance to the platform\'s tenant allowance', fun
     meterRun(userId: 1);
     meterRun(userId: 1);
 
-    // The tenant cap binds first, and the user cap could never have exceeded it anyway.
     expect(limiter()->check(FakeUser::make(), null))->toContain('Your organisation has used');
 });
 
@@ -147,9 +144,7 @@ it('clamps field by field, inheriting the ceiling where the tenant set nothing',
     $clamped = (new Limits(requestsPerDay: 50))->clampTo($ceiling);
 
     expect($clamped->requestsPerDay)->toBe(10)
-        // Unset by the tenant, so the platform's own figure applies rather than staying unlimited.
         ->and($clamped->tokensPerDay)->toBe(1000)
-        // Untouched by either: still unlimited.
         ->and($clamped->requestsPerMonth)->toBeNull();
 });
 
@@ -162,12 +157,11 @@ it('treats a set of nulls as unlimited', function () {
 it('never refuses or counts an exempt turn, though it is still logged', function () {
     config()->set('sidekick.limits.user.requests_per_day', 1);
 
-    // Say, onboarding: the host gives these away.
-    app()->instance(\Devletes\Sidekick\Contracts\UsageExemptions::class, new class implements \Devletes\Sidekick\Contracts\UsageExemptions
+    app()->instance(UsageExemptions::class, new class implements UsageExemptions
     {
         public bool $exempt = true;
 
-        public function exempt(\Illuminate\Contracts\Auth\Authenticatable $user, int|string|null $tenant): bool
+        public function exempt(Authenticatable $user, int|string|null $tenant): bool
         {
             return $this->exempt;
         }
@@ -179,8 +173,7 @@ it('never refuses or counts an exempt turn, though it is still logged', function
 
     expect(limiter()->check(FakeUser::make(), null))->toBeNull();
 
-    // Once turns count again, the free ones are still not held against anyone.
-    app(\Devletes\Sidekick\Contracts\UsageExemptions::class)->exempt = false;
+    app(UsageExemptions::class)->exempt = false;
 
     expect(limiter()->check(FakeUser::make(), null))->toBeNull()
         ->and(Run::query()->where('metered', false)->count())->toBe(2);

@@ -12,10 +12,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use Laravel\Ai\Enums\Lab;
 
-/**
- * The instructions hold nothing that changes between turns, the conversation is cached on Anthropic, and the
- * history is replayed exactly as it was sent, so a turn reads what the turn before it already paid for.
- */
 function cachedConversation(): string
 {
     $id = (string) Str::uuid7();
@@ -44,8 +40,10 @@ function appendMessage(string $conversationId, string $role, string $content, ?s
         'content' => $content,
         'context' => $context,
         'attachments' => '[]',
-        'tool_calls' => '[]',
-        'tool_results' => '[]',
+        'steps' => $role === 'assistant'
+            ? json_encode([['content' => $content, 'tool_calls' => [], 'reasoning' => '', 'replay_blocks' => [], 'provider_tool_calls' => []]])
+            : '[]',
+        'status' => 'completed',
         'usage' => '[]',
         'meta' => '[]',
         'created_at' => now()->addSeconds(++$second),
@@ -69,7 +67,6 @@ it('keeps what changes between turns out of the instructions and hands it to the
 
     StatusTool::$now = 'Step 4 of 9: Employees.';
 
-    // The instructions read the same whatever the step, which is what keeps them, and all after them, cached.
     expect($agent->turnContext())->toBe('Step 4 of 9: Employees.');
 });
 
@@ -125,7 +122,6 @@ it('moves the start of the history in steps, so it stays put while turns are add
     $start = $firstKept();
     appendMessage($id, 'assistant', str_repeat('8', 40));
 
-    // A window sliding one message per turn would start one later now; this one starts where it did.
     expect($firstKept())->toBe($start)
         ->and(app(LeanConversationStore::class)->getLatestConversationMessages($id, PHP_INT_MAX))->toHaveCount(4);
 });

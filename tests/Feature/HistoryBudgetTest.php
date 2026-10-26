@@ -4,12 +4,17 @@ use Devletes\Sidekick\Storage\LeanConversationStore;
 use Devletes\Sidekick\Support\TokenBudget;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Laravel\Ai\Messages\ToolResultMessage;
 
 beforeEach(function () {
     $this->artisan('migrate');
 });
 
-/** Write $count messages of $bytes each, oldest first, and return the conversation id. */
+function storedStep(string $content, array $calls = []): array
+{
+    return ['content' => $content, 'tool_calls' => $calls, 'reasoning' => '', 'replay_blocks' => [], 'provider_tool_calls' => []];
+}
+
 function seedConversation(int $count, int $bytes = 40): string
 {
     $conversationId = (string) Str::uuid7();
@@ -32,8 +37,8 @@ function seedConversation(int $count, int $bytes = 40): string
             'role' => $i % 2 === 1 ? 'user' : 'assistant',
             'content' => str_repeat((string) ($i % 10), $bytes),
             'attachments' => '[]',
-            'tool_calls' => '[]',
-            'tool_results' => '[]',
+            'steps' => $i % 2 === 1 ? '[]' : json_encode([storedStep(str_repeat((string) ($i % 10), $bytes))]),
+            'status' => 'completed',
             'usage' => '[]',
             'meta' => '[]',
             'created_at' => now()->addSeconds($i),
@@ -49,7 +54,6 @@ it('estimates tokens from byte length', function () {
 
     expect(TokenBudget::estimate(''))->toBe(0)
         ->and(TokenBudget::estimate(str_repeat('a', 40)))->toBe(10)
-        // Multi-byte scripts cost more per character, which is what byte length is for.
         ->and(TokenBudget::estimate('日本語'))->toBeGreaterThan(TokenBudget::estimate('abc'));
 });
 
@@ -71,7 +75,6 @@ it('drops the oldest messages until the history fits the token budget', function
     $messages = app(LeanConversationStore::class)->getLatestConversationMessages($id, 10);
 
     expect($messages)->toHaveCount(2)
-        // The newest survive: recency is what carries the thread.
         ->and($messages->last()->content)->toBe(str_repeat('6', 40))
         ->and($messages->first()->content)->toBe(str_repeat('5', 40));
 });
@@ -106,14 +109,14 @@ it('replays a past reply with the tool calls that produced it, long results stub
         'role' => 'assistant',
         'content' => 'Review the card, then Confirm to proceed or Cancel to abort.',
         'attachments' => '[]',
-        'tool_calls' => json_encode([
-            ['id' => 'call_1', 'name' => 'Status', 'arguments' => [], 'result_id' => 'call_1'],
-            ['id' => 'call_2', 'name' => 'ProposeSkip', 'arguments' => ['step' => 'attendance'], 'result_id' => 'call_2'],
+        'steps' => json_encode([
+            storedStep('', [
+                ['id' => 'call_1', 'name' => 'Status', 'arguments' => [], 'result_id' => 'call_1', 'result' => str_repeat('x', 5000)],
+                ['id' => 'call_2', 'name' => 'ProposeSkip', 'arguments' => ['step' => 'attendance'], 'result_id' => 'call_2', 'result' => 'Card shown: Skip Attendance.'],
+            ]),
+            storedStep('Review the card, then Confirm to proceed or Cancel to abort.'),
         ]),
-        'tool_results' => json_encode([
-            ['id' => 'call_1', 'name' => 'Status', 'arguments' => [], 'result' => str_repeat('x', 5000)],
-            ['id' => 'call_2', 'name' => 'ProposeSkip', 'arguments' => ['step' => 'attendance'], 'result' => 'Card shown: Skip Attendance.'],
-        ]),
+        'status' => 'completed',
         'usage' => '[]',
         'meta' => '[]',
         'created_at' => now()->addMinute(),
@@ -122,10 +125,9 @@ it('replays a past reply with the tool calls that produced it, long results stub
 
     $messages = app(LeanConversationStore::class)->getLatestConversationMessages($id, 10)->values();
 
-    // The user's line, the calls, their results, then the reply they explain.
     expect($messages)->toHaveCount(4)
         ->and($messages[1]->toolCalls->pluck('name')->all())->toBe(['Status', 'ProposeSkip'])
-        ->and($messages[2])->toBeInstanceOf(\Laravel\Ai\Messages\ToolResultMessage::class)
+        ->and($messages[2])->toBeInstanceOf(ToolResultMessage::class)
         ->and($messages[2]->toolResults[0]->result)->toContain('Not kept in history')
         ->and($messages[2]->toolResults[1]->result)->toBe('Card shown: Skip Attendance.')
         ->and($messages[3]->content)->toBe('Review the card, then Confirm to proceed or Cancel to abort.');

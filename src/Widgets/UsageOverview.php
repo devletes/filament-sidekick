@@ -40,7 +40,6 @@ class UsageOverview extends StatsOverviewWidget
             ))
                 ->description(__('sidekick::messages.insights.denied_n', ['count' => number_format($denied)])),
 
-            // A failure rate is the number worth watching: it is the one that means something is broken.
             Stat::make(
                 __('sidekick::messages.insights.failure_rate'),
                 $monthTurns === 0 ? '—' : round(($failed / $monthTurns) * 100, 1).'%',

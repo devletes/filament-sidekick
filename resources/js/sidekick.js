@@ -1,4 +1,4 @@
-// Reverb/Pusher bridge subscribed from JS: Livewire's native `echo-` listeners silently no-op when window.Echo boots late.
+// Subscribed from JS because Livewire's `echo-` listeners silently no-op when window.Echo boots late.
 const sidekickEchoChannels = new Set();
 
 const sidekickEchoSubscribe = (el) => {
@@ -24,7 +24,7 @@ const sidekickEchoSubscribe = (el) => {
     window.Echo ? listen() : window.addEventListener('EchoLoaded', listen, { once: true });
 };
 
-// wire:navigate swaps in a fresh <body> without re-running the panel's inline boot script — re-apply its state classes (idempotent; also fires on initial load).
+// wire:navigate swaps <body> without re-running the inline boot script, so re-apply its classes.
 document.addEventListener('livewire:navigated', () => {
     const boot = window.__sidekickBoot;
 
@@ -42,7 +42,6 @@ document.addEventListener('livewire:navigated', () => {
     document.body.classList.add('sidekick-ready');
 });
 
-// One-shot client redirect requested by a completed turn (see ChatPanel::consumeNavigation).
 window.addEventListener('sidekick-navigate', (event) => {
     const url = event.detail?.url ?? event.detail?.[0]?.url;
 
@@ -50,7 +49,6 @@ window.addEventListener('sidekick-navigate', (event) => {
         return;
     }
 
-    // Soft-navigate where supported (SPA mode keeps the panel and conversation alive through the redirect); hard fallback otherwise.
     if (window.Livewire?.navigate) {
         window.Livewire.navigate(url);
     } else {
@@ -61,7 +59,7 @@ window.addEventListener('sidekick-navigate', (event) => {
 document.addEventListener('alpine:init', () => {
     if (! window.Alpine.store('sidekick')) {
         window.Alpine.store('sidekick', {
-            // The panel blade's inline script applied the persisted state before first paint; adopt it as the source of truth.
+            // Adopt the state the inline boot script applied before first paint.
             open: document.body.classList.contains('sidekick-open'),
 
             toggle() {
@@ -75,20 +73,18 @@ document.addEventListener('alpine:init', () => {
                 try {
                     localStorage.setItem('sidekick.open', open ? '1' : '0');
                 } catch (e) {
-                    // Storage unavailable (private mode) — state just won't persist.
+                    // Storage unavailable (private mode).
                 }
             },
         });
     }
 
-    // Echo bridge host — sits on the panel root so the subscription happens when the component actually lands in the DOM.
     window.Alpine.data('sidekickEcho', () => ({
         init() {
             sidekickEchoSubscribe(this.$el);
         },
     }));
 
-    // Sticky auto-scroll: follows new content only while the user is near the bottom, so reading scrollback is never hijacked.
     window.Alpine.data('sidekickLog', () => ({
         stick: true,
 
@@ -101,14 +97,14 @@ document.addEventListener('alpine:init', () => {
                 }
             }).observe(this.$el, { childList: true, characterData: true, subtree: true });
 
-            // Size changes (panel opening from zero width, composer/card swap) move the bottom edge without a DOM mutation — re-stick.
+            // Size changes move the bottom edge without a DOM mutation.
             new ResizeObserver(() => {
                 if (this.stick) {
                     this.toBottom();
                 }
             }).observe(this.$el);
 
-            // wire:navigate:scroll puts the log back where it was; if a message landed during the swap, follow it to the end.
+            // A message may have landed during the navigate swap.
             document.addEventListener('livewire:navigated', () => {
                 if (this.stick) {
                     this.toBottom();
@@ -130,7 +126,6 @@ document.addEventListener('alpine:init', () => {
         },
     }));
 
-    // Typewriter for the streaming bubble: reveals each polled chunk letter by letter, pacing up with the backlog.
     window.Alpine.data('sidekickStream', () => ({
         shown: '',
         target: '',
@@ -152,7 +147,7 @@ document.addEventListener('alpine:init', () => {
                     this.$el.textContent = this.shown; // hand content back to the typewriter
                     this.type();
                 } else {
-                    this.shown = this.target = full; // replaced wholesale — adopt as-is
+                    this.shown = this.target = full;
                 }
             }).observe(this.$el, { childList: true, characterData: true, subtree: true });
         },
@@ -173,7 +168,7 @@ document.addEventListener('alpine:init', () => {
                     return;
                 }
 
-                // Spread the backlog across ~one poll interval for a steady flow; the fractional carry keeps sub-1-char-per-frame speeds smooth.
+                // Drain the backlog over ~one poll interval; the fractional carry smooths sub-1-char frames.
                 const backlog = this.target.length - this.shown.length;
                 this.carry += Math.min(Math.max(backlog / 90, 0.45), 8);
 

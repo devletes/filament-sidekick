@@ -7,7 +7,7 @@ use Illuminate\Broadcasting\PrivateChannel;
 use Illuminate\Contracts\Broadcasting\ShouldBroadcastNow;
 use Illuminate\Foundation\Events\Dispatchable;
 
-/** Lightweight nudge broadcast per user (the only stable subscription key — the panel mounts on a fresh conversation); the panel re-renders from the database. */
+/** Lightweight per-user nudge; the panel re-renders from the database. */
 class RunUpdated implements ShouldBroadcastNow
 {
     use Dispatchable;

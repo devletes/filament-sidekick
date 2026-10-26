@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
 use Symfony\Component\Console\Attribute\AsCommand;
 
-/** Generates baseline Sidekick classes from the host's Filament resources; existing files are never overwritten, so re-running is safe. */
+/** Existing files are never overwritten, so re-running is safe. */
 #[AsCommand(name: 'sidekick:scaffold')]
 class ScaffoldCommand extends Command
 {
@@ -50,11 +50,7 @@ class ScaffoldCommand extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * The sidekick.scaffold.only allowlist when set, otherwise every registered panel's resources; the ignore list applies to both.
-     *
-     * @return array<class-string, string|null> Resource class → panel id (null = default panel).
-     */
+    /** @return array<class-string, string|null> Resource class → panel id (null = default panel). */
     protected function resources(): array
     {
         $map = [];
@@ -139,8 +135,6 @@ class ScaffoldCommand extends Command
     }
 
     /**
-     * One resolver covering every scaffolded resource: an index target each, plus a `.record` target when a view/edit page exists.
-     *
      * @param  array<class-string, string|null>  $resources
      * @return array{0: string, 1: string}|null
      */
@@ -181,7 +175,7 @@ class ScaffoldCommand extends Command
         return [app_path('Sidekick/ResourceResolver.php'), $contents];
     }
 
-    /** A `tenant:` argument for generated getUrl calls when the panel is multi-tenant (PanelContext keeps the tenant live in queued turns). */
+    /** PanelContext keeps the tenant live in queued turns, so generated getUrl calls can pass it. */
     protected function tenantArg(?string $panelId): string
     {
         try {
@@ -205,7 +199,6 @@ class ScaffoldCommand extends Command
             : (array_filter([$resource::getRecordTitleAttribute()]) ?: ['name']);
     }
 
-    /** Writes unless the file exists or this is a dry run; reports either way. Returns whether it wrote. */
     protected function write(string $path, string $contents): bool
     {
         $relative = str_replace('\\', '/', Str::after($path, base_path().DIRECTORY_SEPARATOR));
@@ -234,7 +227,6 @@ class ScaffoldCommand extends Command
         return strtr((string) file_get_contents(__DIR__."/../../stubs/{$name}.stub"), $replacements);
     }
 
-    /** The host app's root namespace, e.g. `App\`. */
     protected function rootNamespace(): string
     {
         return $this->laravel->getNamespace();

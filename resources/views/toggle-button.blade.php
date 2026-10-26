@@ -1,7 +1,7 @@
 @auth
     @php
         $label = config('sidekick.assistant.name', 'Assistant');
-        // Normally supplied by the plugin's render hook; defaulted so the view also renders standalone.
+        // Normally passed by the render hook; defaulted for standalone use.
         $icon ??= config('sidekick.icons.assistant', 'heroicon-o-sparkles');
     @endphp
 

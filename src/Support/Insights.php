@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Throwable;
 
-/** Shared query surface for the insights widgets, so tenant scoping is decided in exactly one place. */
+/** Tenant scoping for the insights widgets is decided here and nowhere else. */
 class Insights
 {
     /** @var array<string, string>|null */
@@ -18,13 +18,7 @@ class Insights
     /** @var array<string, string>|null */
     protected static ?array $userLabelCache = null;
 
-    /**
-     * Runs the current viewer is allowed to see.
-     *
-     * On a tenant panel this is that tenant's runs and nothing else. If tenancy is on but no tenant resolved,
-     * the query returns nothing rather than everything — an insights page is the last place a scoping gap
-     * should fail open.
-     */
+    /** Fails closed: tenancy on but no tenant resolved returns nothing, not everything. */
     public static function runs(): Builder
     {
         $query = Run::query();
@@ -46,13 +40,12 @@ class Insights
             : $query->where('tenant_id', (string) $tenant);
     }
 
-    /** Runs that actually reached a provider — denied ones cost nothing and would flatter the failure rate. */
+    /** Excludes denied runs: they cost nothing and would flatter the failure rate. */
     public static function spent(): Builder
     {
         return static::runs()->where('denied', false);
     }
 
-    /** Whether the current panel narrows to one tenant. When it does not, totals are cross-tenant and say so. */
     public static function isTenantScoped(): bool
     {
         try {
@@ -62,14 +55,7 @@ class Insights
         }
     }
 
-    /**
-     * Whether this installation serves more than one tenant at all — a different question from whether the
-     * *current* panel narrows to one, and the reason both have to be asked.
-     *
-     * Detected from the panels themselves: any panel with tenancy means the app is multi-tenant. That is
-     * right for a single-tenant install (nothing has tenancy) and for a console sitting beside a workspace
-     * panel (the workspace does). Set `sidekick.tenancy.multi_tenant` to true or false to decide it yourself.
-     */
+    /** Install-wide (any panel has tenancy), unlike isTenantScoped(); `sidekick.tenancy.multi_tenant` overrides. */
     public static function isMultiTenant(): bool
     {
         $configured = config('sidekick.tenancy.multi_tenant');
@@ -91,18 +77,12 @@ class Insights
         return false;
     }
 
-    /**
-     * Whether this page's numbers cover more than one tenant, and should therefore be broken down by tenant.
-     *
-     * True only on a console-style panel of a multi-tenant install. A single-tenant app has nothing to break
-     * down, and a tenant panel is already one tenant — both would get a single meaningless row.
-     */
     public static function spansTenants(): bool
     {
         return static::isMultiTenant() && ! static::isTenantScoped();
     }
 
-    /** One tenant's display name. Prime with the ids on screen first; a lone id still resolves on its own. */
+    /** Prime with the ids on screen first to batch the lookups. */
     public static function tenantLabel(int|string|null $id): string
     {
         if ($id === null || $id === '') {
@@ -114,7 +94,6 @@ class Insights
         return static::$tenantLabelCache[(string) $id] ?? (string) $id;
     }
 
-    /** One user's display name, resolved the same way. */
     public static function userLabel(int|string|null $id): string
     {
         if ($id === null || $id === '') {
@@ -127,12 +106,6 @@ class Insights
     }
 
     /**
-     * Resolve a page's worth of ids in one query.
-     *
-     * Called by the table columns with the ids actually on screen. Resolving from every run ever recorded
-     * would be one query too, but an unboundedly large one — the point is to batch the visible rows, not the
-     * whole table.
-     *
      * @param  iterable<int, mixed>  $ids
      */
     public static function primeTenantLabels(iterable $ids): void
@@ -155,8 +128,7 @@ class Insights
     }
 
     /**
-     * Look up whatever is not cached yet, and remember the misses too — an id with no matching row would
-     * otherwise be re-queried for every row that mentions it.
+     * Misses are cached too, so an id with no row isn't re-queried for every row that mentions it.
      *
      * @param  array<string, string>|null  $cache
      * @param  iterable<int, mixed>  $ids
@@ -188,19 +160,14 @@ class Insights
         return $cache;
     }
 
-    /** Cleared between requests by the container; exposed for tests that change the underlying data. */
+    /** For tests that change the underlying data. */
     public static function forgetLabels(): void
     {
         static::$tenantLabelCache = null;
         static::$userLabelCache = null;
     }
 
-    /**
-     * The per-tenant aggregate for the current month, as a query. TenantUsage wraps it in a subquery, since
-     * Filament's sort tiebreaker cannot be applied on top of a GROUP BY under MySQL's only_full_group_by.
-     *
-     * `tenant_id as id` gives each row a key; coalescing keeps the tenantless bucket addressable.
-     */
+    /** Wrapped in a subquery by TenantUsage: Filament's sort tiebreaker breaks GROUP BY under only_full_group_by. */
     public static function perTenantQuery(): Builder
     {
         return static::spent()
@@ -212,9 +179,6 @@ class Insights
     }
 
     /**
-     * Tenant ids resolved to names, so a console reads as customers rather than integers. Needs
-     * `insights.tenant_model` — the package cannot know the host's tenant model, and falls back to the id.
-     *
      * @param  array<int, mixed>  $ids
      * @return array<string, string>
      */
@@ -227,11 +191,7 @@ class Insights
         );
     }
 
-    /**
-     * The tenant model, discovered rather than configured wherever possible: a tenant panel already declares
-     * one, so a console beside it can borrow that instead of making you repeat it. `insights.tenant_model`
-     * wins when set, for the case where no panel in this app has tenancy but the runs still carry a tenant.
-     */
+    /** Borrowed from any tenant panel; `insights.tenant_model` wins for runs with a tenant but no tenancy panel. */
     public static function tenantModel(): ?string
     {
         $configured = config('sidekick.insights.tenant_model');
@@ -254,9 +214,6 @@ class Insights
     }
 
     /**
-     * User ids resolved to names. Unlike tenants the model is discoverable — it is the panel guard's own —
-     * so this needs no configuration beyond the attribute to read.
-     *
      * @param  array<int, mixed>  $ids
      * @return array<string, string>
      */
@@ -276,9 +233,6 @@ class Insights
     }
 
     /**
-     * One batched lookup of key => label. Always batched: these feed table columns, and resolving per row
-     * would turn a page of runs into a page of queries.
-     *
      * @param  array<int, mixed>  $ids
      * @return array<string, string>
      */
@@ -291,9 +245,7 @@ class Insights
         }
 
         try {
-            // Hydrated rather than plucked: `name` is an attribute, not necessarily a column. Plenty of user
-            // models compute it from first_name/last_name, and asking SQL for a column that does not exist
-            // fails the whole lookup. Reading it off the model runs accessors and casts as well.
+            // Hydrated, not plucked: the label may be an accessor rather than a real column.
             return $model::query()
                 ->whereKey($ids)
                 ->get()
@@ -302,12 +254,10 @@ class Insights
                 ])
                 ->all();
         } catch (Throwable) {
-            // A missing attribute should degrade to ids, not blank the page.
             return [];
         }
     }
 
-    /** The configured attribute, then Filament's own name contract, then the key — first one that says something. */
     protected static function labelOf(Model $record, string $attribute): string
     {
         $label = rescue(fn () => $record->getAttribute($attribute), null, report: false);
@@ -323,7 +273,6 @@ class Insights
         return (string) $record->getKey();
     }
 
-    /** Turns and tokens per day for the last $days days, zero-filled so the chart has no gaps. */
     public static function daily(int $days = 30): array
     {
         $from = now()->subDays($days - 1)->startOfDay();

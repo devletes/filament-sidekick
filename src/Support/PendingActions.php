@@ -13,7 +13,6 @@ class PendingActions
 {
     public function __construct(protected ActionRegistry $registry) {}
 
-    /** @return array The stored proposal (for the tool's response to the model). */
     public function propose(string $type, array $payload, Authenticatable $user): array
     {
         $handler = $this->registry->handler($type);
@@ -44,7 +43,7 @@ class PendingActions
             'type' => $type,
             'payload' => $prepared['payload'],
             'preview' => $prepared['preview'],
-            // Optional upload spec ({required, label, multiple}): presence makes the confirm card render a file field.
+            // Optional {required, label, multiple}; presence makes the confirm card render a file field.
             'upload' => $prepared['upload'] ?? null,
             'summary' => $prepared['summary'],
             'confirmation' => ($handler instanceof ProposableAction ? $handler->confirmation() : ConfirmationMode::Inline)->value,

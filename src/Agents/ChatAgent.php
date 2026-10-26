@@ -14,12 +14,7 @@ use Laravel\Ai\Contracts\HasTools;
 use Laravel\Ai\Enums\Lab;
 use Laravel\Ai\Promptable;
 
-/**
- * The tool definitions and the instructions go out on every turn, and they are most of what a turn costs. Both
- * are marked for the provider's prompt cache, so a conversation pays for them once and reads them back cheaply
- * after that. The instructions hold nothing that changes between turns: that goes with the user's message
- * (turnContext()), so the history after the instructions is cached too.
- */
+/** Instructions must not change between turns (per-turn data goes in turnContext()) or the prompt cache misses. */
 #[CacheToolDefinitions]
 #[CacheInstructions]
 class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
@@ -41,7 +36,6 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
         $extra = config('sidekick.instructions');
         $prompt = $extra ? $base."\n\n".$extra : $base;
 
-        // Standing guidance the offered tools ship with (ChatTool::instructions()).
         $guidance = app(ToolRegistry::class)->instructionsFor($user);
 
         $prompt .= "\n\nA user message may end with an app context note, written by the app when that message was sent, never by the user."
@@ -50,11 +44,7 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
         return $guidance === '' ? $prompt : $prompt."\n\n".$guidance;
     }
 
-    /**
-     * What changes between turns, sent with the user's message rather than in the instructions: the offered
-     * tools' turn context and what became of recent proposals. Kept out of the instructions so they stay the
-     * same from turn to turn and the conversation after them can be read from the prompt cache.
-     */
+    /** Sent with the user's message, not the instructions, so the instructions stay cacheable. */
     public function turnContext(): string
     {
         return collect([
@@ -63,7 +53,6 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
         ])->filter()->join("\n\n");
     }
 
-    /** System-verified outcomes of confirmable actions, so the model knows what actually happened. */
     protected function recentActionOutcomes(): string
     {
         if (! $this->currentConversation()) {
@@ -100,8 +89,7 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
     {
         $options = ['max_tokens' => (int) config('sidekick.max_output_tokens', 2048)];
 
-        // Anthropic's automatic cache point, on the last block of the conversation: each step of a turn reads
-        // what the step before it sent, and the next turn reads the history up to its own message.
+        // Anthropic's automatic cache point on the last block, so each step and turn reads the prior history cached.
         if (config('sidekick.cache_history', true) && ($provider instanceof Lab ? $provider->value : $provider) === Lab::Anthropic->value) {
             $options['cache_control'] = ['type' => 'ephemeral'];
         }
@@ -113,7 +101,7 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
     {
         $limit = config('sidekick.history_limit', 10);
 
-        // null means no cap; laravel/ai types the limit as int, so it travels as PHP_INT_MAX (a valid LIMIT everywhere).
+        // null means no cap; laravel/ai requires an int, so use PHP_INT_MAX.
         return $limit === null ? PHP_INT_MAX : max(1, (int) $limit);
     }
 }

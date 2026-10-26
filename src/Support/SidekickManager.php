@@ -11,7 +11,7 @@ use Devletes\Sidekick\Tools\Navigate;
 use Devletes\Sidekick\Tools\PresentActions;
 use Illuminate\Support\Facades\Log;
 
-/** Single source of truth for tools and actions; class lists are recomputed per call because config is profile-swapped mid-process. */
+/** Class lists are recomputed per call because config is profile-swapped mid-process. */
 class SidekickManager
 {
     /** @var array<int, class-string<ChatTool>> */
@@ -20,14 +20,14 @@ class SidekickManager
     /** @var array<int, class-string<ActionHandler>> */
     protected array $runtimeActions = [];
 
-    /** @var array<string, array<int, string>> Discovery scan cache, keyed by root path. */
+    /** @var array<string, array<int, string>> */
     protected array $discovered = [];
 
-    /** @var array<string, true> Classes already logged as withheld, so one broken tool cannot flood the log. */
+    /** @var array<string, true> */
     protected array $withheld = [];
 
     /**
-     * Register tool classes at runtime (works in queue workers, unlike per-panel plugin state).
+     * Works in queue workers, unlike per-panel plugin state.
      *
      * @param  array<int, class-string<ChatTool>>  $classes
      */
@@ -39,8 +39,6 @@ class SidekickManager
     }
 
     /**
-     * Register action classes at runtime.
-     *
      * @param  array<int, class-string<ActionHandler>>  $classes
      */
     public function actions(array $classes): static
@@ -71,7 +69,7 @@ class SidekickManager
     }
 
     /**
-     * Every tool instance that could be offered — the pre-authorization set; filter via ToolRegistry::authorizedFor.
+     * Pre-authorization set; filter via ToolRegistry::authorizedFor.
      *
      * @return array<int, ChatTool>
      */
@@ -115,9 +113,6 @@ class SidekickManager
     }
 
     /**
-     * Classes from dependsOn() that no longer exist. A tool that names what it needs can be withheld cleanly
-     * instead of fataling mid-turn, and sidekick:check can report it before anyone chats.
-     *
      * @return array<int, class-string>
      */
     public static function missingDependencies(ChatTool|ActionHandler $handler): array
@@ -130,7 +125,7 @@ class SidekickManager
         ));
     }
 
-    /** Withhold a handler whose dependencies are gone, logging once per class so the silence is never total. */
+    /** Withheld rather than fataling mid-turn; logs once per class. */
     protected function isWithheld(ChatTool|ActionHandler $handler): bool
     {
         $missing = static::missingDependencies($handler);
@@ -150,7 +145,6 @@ class SidekickManager
         return true;
     }
 
-    /** The registered handler for an action type, if any. */
     public function actionHandler(string $type): ?ActionHandler
     {
         foreach ($this->actionInstances() as $handler) {
@@ -163,8 +157,6 @@ class SidekickManager
     }
 
     /**
-     * Built-ins wake once an ActionResolver with targets is bound; each can be forced off via sidekick.builtin_tools.
-     *
      * @return array<int, ChatTool>
      */
     protected function builtinTools(): array
@@ -185,9 +177,6 @@ class SidekickManager
     }
 
     /**
-     * Classes under the discovery roots; anything not implementing the contract is skipped, so helpers and
-     * sub-namespaces can live alongside. Roots are scanned recursively — organise by domain or by kind freely.
-     *
      * @param  class-string  $contract
      * @return array<int, string>
      */
@@ -210,8 +199,7 @@ class SidekickManager
     }
 
     /**
-     * Discovery roots, normalised and deduplicated. Each should be a tree that only holds Sidekick classes —
-     * discovery autoloads what it finds, so pointing a root at a shared tree like app/Filament costs real boot time.
+     * Discovery autoloads what it finds, so roots should only hold Sidekick classes.
      *
      * @return array<int, string>
      */
@@ -225,7 +213,7 @@ class SidekickManager
         ))));
     }
 
-    /** @return array<int, string> Instantiable classes declared anywhere beneath $path. */
+    /** @return array<int, string> */
     protected function scan(string $path): array
     {
         if (! is_dir($path)) {
@@ -260,7 +248,6 @@ class SidekickManager
         return $classes;
     }
 
-    /** Resolve a file to its FQCN by reading the namespace declaration — no assumptions about the host's root namespace. */
     protected function classFromFile(string $file): ?string
     {
         $handle = @fopen($file, 'rb');
@@ -269,7 +256,6 @@ class SidekickManager
             return null;
         }
 
-        // The declaration is always in the opening lines, so never read a whole file to find it.
         $head = (string) fread($handle, 8192);
         fclose($handle);
 
@@ -280,7 +266,6 @@ class SidekickManager
         return trim($namespace[1]).'\\'.basename($file, '.php');
     }
 
-    /** Reset runtime registrations and discovery caches (tests). */
     public function flush(): void
     {
         $this->runtimeTools = [];

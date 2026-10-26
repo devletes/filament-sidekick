@@ -88,7 +88,6 @@ it('shows nothing rather than everything when tenancy is on but no tenant resolv
     insightRun(tenant: '1');
     insightRun(tenant: null);
 
-    // Failing open here would leak every tenant's totals into one page.
     expect(Insights::runs()->count())->toBe(0);
 });
 
@@ -110,7 +109,6 @@ it('zero-fills the daily series so the chart has no gaps', function () {
         ->and($daily['turns'])->toHaveCount(7)
         ->and(array_sum($daily['turns']))->toBe(2)
         ->and(array_sum($daily['tokens']))->toBe(120)
-        // Today is the last bucket.
         ->and($daily['turns'][6])->toBe(1);
 });
 
@@ -127,7 +125,6 @@ it('renders the stats widget with real totals', function () {
 
     Livewire::test(UsageOverview::class)
         ->assertOk()
-        // Two turns today, 200 tokens between them.
         ->assertSee('200')
         ->assertSee('Turns today');
 });
@@ -167,7 +164,6 @@ it('breaks usage down per tenant on a panel that spans them', function () {
         ->and((int) $rows['acme']->tokens)->toBe(150)
         ->and((int) $rows['acme']->failed)->toBe(1)
         ->and((int) $rows['globex']->turns)->toBe(1)
-        // Runs with no tenant are still someone's usage; they get their own bucket rather than being dropped.
         ->and((int) $rows['']->turns)->toBe(1);
 });
 
@@ -207,7 +203,6 @@ it('names tenants when a tenant model is configured, and falls back to the id', 
     Insights::forgetLabels();
 
     expect(Insights::tenantLabel((string) $acme->getKey()))->toBe('Acme Ltd')
-        // Unknown id: shown as itself rather than blank.
         ->and(Insights::tenantLabel('4242'))->toBe('4242');
 });
 
@@ -220,23 +215,20 @@ it('shows the per-tenant breakdown only on a cross-tenant panel of a multi-tenan
 
     registerFilamentPanels(app());
 
-    // A console beside a tenant panel: this is the one case worth breaking down.
     Filament::setCurrentPanel('testing');
     expect(Insights::isMultiTenant())->toBeTrue()
         ->and(TenantUsage::canView())->toBeTrue();
 
-    // A tenant panel is already one tenant; the split would be a single row.
     Filament::setCurrentPanel('tenanted');
     expect(TenantUsage::canView())->toBeFalse();
 });
 
 it('never offers a per-tenant breakdown on a single-tenant install', function () {
     registerFilamentPanels(app());
-    // Detection asks the panels; forcing it off stands in for an app with no tenant panel at all.
+    // Forcing detection off stands in for an app with no tenant panel.
     config()->set('sidekick.tenancy.multi_tenant', false);
     Filament::setCurrentPanel('testing');
 
-    // Otherwise every run has a null tenant and the breakdown is one meaningless row.
     expect(Insights::spansTenants())->toBeFalse()
         ->and(TenantUsage::canView())->toBeFalse();
 });
@@ -251,7 +243,7 @@ it('lets config override tenancy detection in both directions', function () {
     config()->set('sidekick.tenancy.multi_tenant', false);
     expect(Insights::isMultiTenant())->toBeFalse();
 
-    // null falls back to detection, and this app does have a tenant panel.
+    // null falls back to detection; this app has a tenant panel.
     config()->set('sidekick.tenancy.multi_tenant', null);
     expect(Insights::isMultiTenant())->toBeTrue();
 });

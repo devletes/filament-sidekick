@@ -10,7 +10,6 @@ abstract class ChatToolBase implements ChatTool
 {
     protected ?Authenticatable $user = null;
 
-    /** Set by the registry before the tool is offered to the model. */
     public function forUser(Authenticatable $user): static
     {
         $this->user = $user;
@@ -23,7 +22,6 @@ abstract class ChatToolBase implements ChatTool
         return true;
     }
 
-    /** Override with something specific; the default derives from the class name. */
     public function label(): string
     {
         return 'Using: '.Str::headline(class_basename(static::class));
@@ -39,13 +37,12 @@ abstract class ChatToolBase implements ChatTool
         return ['*'];
     }
 
-    /** Name the resources and models this tool reads, and deleting one becomes a reported problem instead of a surprise. */
+    /** Resources/models this tool reads, so deleting one is reported as a problem. */
     public function dependsOn(): array
     {
         return [];
     }
 
-    /** Compact JSON reads best for the model. */
     protected function respond(array $payload): string
     {
         return json_encode($payload, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);

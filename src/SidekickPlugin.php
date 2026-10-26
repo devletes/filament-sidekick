@@ -34,7 +34,7 @@ class SidekickPlugin implements Plugin
         return app(static::class);
     }
 
-    /** This panel's plugin instance, or null outside a panel (queue workers, console). */
+    /** Null outside a panel (queue workers, console). */
     public static function get(): ?static
     {
         try {
@@ -46,13 +46,7 @@ class SidekickPlugin implements Plugin
         return $plugin instanceof static ? $plugin : null;
     }
 
-    /**
-     * Register everything except the chat panel itself — no toggle button, no dock.
-     *
-     * For a panel that wants the insights page and nothing else: an admin console, or any panel where the
-     * assistant makes no sense. Worth reaching for whenever a panel has no tenant, since a chat mounted there
-     * has nothing for a tenant-scoped SidekickContext to scope a conversation to.
-     */
+    /** Registers everything except the chat itself; use it for panels with no tenant to scope conversations to. */
     public function withoutChat(): static
     {
         $this->chat = false;
@@ -60,12 +54,7 @@ class SidekickPlugin implements Plugin
         return $this;
     }
 
-    /**
-     * Add the insights page — turns, tokens, failures and recent activity, scoped to the panel's tenant.
-     *
-     * Pass a closure to say who may open it; without one it is visible to anyone who can reach the panel,
-     * which is rarely what you want on a page that totals other people's usage.
-     */
+    /** Without an authorization closure the page is visible to anyone who can reach the panel. */
     public function enableInsights(bool|Closure $condition = true): static
     {
         if ($condition instanceof Closure) {
@@ -85,16 +74,7 @@ class SidekickPlugin implements Plugin
         return $this->insightsAuthorization;
     }
 
-    /**
-     * Use your own page class instead of the packaged one — extend SidekickInsights and override whatever
-     * you need, which is how a Filament page is customised anywhere else.
-     *
-     * This is deliberately the only customisation hook. Navigation label, icon, sort, group, sidebar
-     * visibility, slug, heading and the widget list are all ordinary page members, so a subclass reaches
-     * them without the package having to grow a setter for each one.
-     *
-     * @param  class-string<SidekickInsights>|null  $page
-     */
+    /** @param  class-string<SidekickInsights>|null  $page */
     public function insightsPage(?string $page): static
     {
         $this->insightsPage = $page;
@@ -116,10 +96,7 @@ class SidekickPlugin implements Plugin
         return $this;
     }
 
-    /**
-     * Offer past conversations from a dropdown beside New conversation. Off unless a panel asks for it, or
-     * `sidekick.history.enabled` is set. Pass false to keep it off in a panel where config turned it on.
-     */
+    /** Overrides `sidekick.history.enabled` for this panel in either direction. */
     public function enableHistory(bool $condition = true): static
     {
         $this->history = $condition;

@@ -9,11 +9,7 @@ use Illuminate\Console\Command;
 use ReflectionClass;
 use Throwable;
 
-/**
- * Answers two questions about the assistant's capability surface: what is broken right now, and what would
- * break if a given class went away. Declared dependsOn() entries are checked, and so are the file's own
- * imports — so a deleted resource is reported even in tools that never declared anything.
- */
+/** Checks each file's imports as well as dependsOn(), so undeclared coupling to a deleted class is caught. */
 class CheckCommand extends Command
 {
     protected $signature = 'sidekick:check
@@ -37,8 +33,7 @@ class CheckCommand extends Command
     }
 
     /**
-     * Every registered class, instantiated where possible. Uses the raw class lists rather than the instance
-     * accessors, which deliberately withhold anything already broken — the broken ones are the point here.
+     * Raw class lists, not the instance accessors, which withhold anything already broken.
      *
      * @return array<string, ChatTool|ActionHandler|null>
      */
@@ -90,8 +85,7 @@ class CheckCommand extends Command
             return self::SUCCESS;
         }
 
-        // Printed as lines rather than a table: fully qualified class names are long, and a table truncates
-        // exactly the part you need to act on.
+        // Lines, not a table: a table truncates the long class names you need to act on.
         $this->newLine();
 
         $total = 0;
@@ -156,11 +150,7 @@ class CheckCommand extends Command
         return self::SUCCESS;
     }
 
-    /**
-     * Class-likes the file imports that no longer exist.
-     *
-     * @return array<int, string>
-     */
+    /** @return array<int, string> */
     protected function missingImports(string $class): array
     {
         return array_values(array_filter(
@@ -173,8 +163,7 @@ class CheckCommand extends Command
     }
 
     /**
-     * Top-level `use` imports, which is where a tool's real coupling shows up whether or not anyone declared it.
-     * Grouped imports are skipped rather than half-parsed, and `use function` / `use const` are not class-likes.
+     * Top-level class imports only; grouped imports and `use function` / `use const` are skipped.
      *
      * @return array<int, string>
      */

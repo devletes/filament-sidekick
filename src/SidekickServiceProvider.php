@@ -50,14 +50,13 @@ class SidekickServiceProvider extends ServiceProvider
                 config('sidekick.limits.provider') ?? ConfigLimits::class,
             ),
         );
-        // Nothing is exempt until the host says what is.
         $this->app->singletonIf(
             UsageExemptions::class,
             fn ($app) => $app->make(
                 config('sidekick.limits.exemptions') ?? NoExemptions::class,
             ),
         );
-        // MeteredUsage is inert until sidekick.limits.enabled, so this default changes nothing until asked.
+        // MeteredUsage is inert until sidekick.limits.enabled.
         $this->app->singletonIf(
             UsageLimiter::class,
             fn ($app) => $app->make(

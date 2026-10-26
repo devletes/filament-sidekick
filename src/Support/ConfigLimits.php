@@ -5,10 +5,7 @@ namespace Devletes\Sidekick\Support;
 use Devletes\Sidekick\Contracts\LimitProvider;
 use Illuminate\Contracts\Auth\Authenticatable;
 
-/**
- * Default LimitProvider: the same allowances for everyone, from config. Enough for a single-tenant app or a
- * flat plan; bind your own LimitProvider once tenants need their own numbers.
- */
+/** Same config allowances for everyone; bind your own LimitProvider for per-tenant numbers. */
 class ConfigLimits implements LimitProvider
 {
     public function forTenant(int|string|null $tenant): Limits

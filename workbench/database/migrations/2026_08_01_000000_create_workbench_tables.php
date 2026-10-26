@@ -8,30 +8,32 @@ return new class extends Migration
 {
     public function up(): void
     {
-        Schema::create('leave_policies', function (Blueprint $table) {
+        Schema::create('products', function (Blueprint $table) {
             $table->id();
             $table->string('name');
-            $table->unsignedSmallInteger('allowance');
-            $table->boolean('paid')->default(true);
+            $table->string('sku')->unique();
+            $table->unsignedInteger('stock');
+            $table->unsignedInteger('reorder_at')->default(10);
             $table->timestamps();
         });
 
-        Schema::create('leave_requests', function (Blueprint $table) {
+        Schema::create('orders', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('user_id');
-            $table->foreignId('leave_policy_id');
-            $table->date('from');
-            $table->date('to');
-            $table->decimal('days', 4, 1);
-            $table->string('status')->default('pending');
-            $table->string('reason')->nullable();
+            $table->unsignedInteger('number')->unique();
+            $table->string('customer');
+            $table->unsignedSmallInteger('items');
+            $table->decimal('total', 10, 2);
+            $table->decimal('refunded', 10, 2)->default(0);
+            $table->string('status')->default('paid');
+            $table->timestamp('placed_at');
+            $table->timestamp('shipped_at')->nullable();
             $table->timestamps();
         });
     }
 
     public function down(): void
     {
-        Schema::dropIfExists('leave_requests');
-        Schema::dropIfExists('leave_policies');
+        Schema::dropIfExists('orders');
+        Schema::dropIfExists('products');
     }
 };

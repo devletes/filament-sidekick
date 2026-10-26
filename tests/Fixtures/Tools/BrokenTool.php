@@ -6,7 +6,6 @@ use Devletes\Sidekick\Support\ChatToolBase;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Tools\Request;
 
-/** Declares a dependency that does not exist — stands in for a tool whose resource was deleted. */
 class BrokenTool extends ChatToolBase
 {
     public const MISSING = 'Devletes\Sidekick\Tests\Fixtures\DeletedResource';

@@ -2,7 +2,7 @@
 
 namespace Devletes\Sidekick\Support;
 
-/** Per-run scratch state: the job binds a fresh instance before streaming, tools write into it, the job persists the outcome. */
+/** Per-run scratch state: bound fresh by the job, written by tools, persisted by the job. */
 class RunContext
 {
     public ?string $navigateTo = null;

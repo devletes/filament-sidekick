@@ -6,7 +6,7 @@ use Devletes\Sidekick\SidekickPlugin;
 use Devletes\Sidekick\Support\Insights;
 use Devletes\Sidekick\Tests\Fixtures\Models\Employee;
 use Devletes\Sidekick\Tests\Fixtures\Models\Person;
-use Devletes\Sidekick\Tests\Fixtures\Pages\NyraInsights;
+use Devletes\Sidekick\Tests\Fixtures\Pages\AssistantInsights;
 use Devletes\Sidekick\Tests\Fixtures\Widgets\CustomRecentRuns;
 use Devletes\Sidekick\Widgets\RecentRuns;
 use Devletes\Sidekick\Widgets\TenantUsage;
@@ -45,7 +45,6 @@ function onPanel(string $panel = 'testing'): void
     Filament::setCurrentPanel($panel);
 }
 
-/** Register a configured plugin on the panel being served, the way a panel provider would. */
 function withPlugin(SidekickPlugin $plugin, string $panel = 'testing'): void
 {
     registerFilamentPanels(app());
@@ -60,34 +59,31 @@ it('ships sensible navigation defaults', function () {
         ->and(SidekickInsights::getNavigationIcon())->toBe('heroicon-o-chart-bar')
         ->and(SidekickInsights::getNavigationGroup())->toBeNull()
         ->and(SidekickInsights::shouldRegisterNavigation())->toBeTrue()
-        // Filament derives the slug from the class name; no override needed.
         ->and(SidekickInsights::getRoutePath(Filament::getPanel('testing')))->toBe('/sidekick-insights');
 });
 
 it('honours a subclass overriding navigation the ordinary Filament way', function () {
     onPanel();
 
-    // Static properties, no package API. This is the whole customisation story.
-    expect(NyraInsights::getNavigationLabel())->toBe('Nyra Insights')
-        ->and(NyraInsights::getNavigationIcon())->toBe('heroicon-o-sparkles')
-        ->and(NyraInsights::getNavigationSort())->toBe(42)
-        ->and(NyraInsights::getNavigationGroup())->toBe('Reports')
-        ->and(NyraInsights::getRoutePath(Filament::getPanel('testing')))->toBe('/nyra-usage')
-        // Route kept, sidebar entry dropped.
-        ->and(NyraInsights::shouldRegisterNavigation())->toBeFalse();
+    expect(AssistantInsights::getNavigationLabel())->toBe('Assistant Insights')
+        ->and(AssistantInsights::getNavigationIcon())->toBe('heroicon-o-sparkles')
+        ->and(AssistantInsights::getNavigationSort())->toBe(42)
+        ->and(AssistantInsights::getNavigationGroup())->toBe('Reports')
+        ->and(AssistantInsights::getRoutePath(Filament::getPanel('testing')))->toBe('/assistant-usage')
+        ->and(AssistantInsights::shouldRegisterNavigation())->toBeFalse();
 });
 
 it('takes the page heading from the subclass label', function () {
     onPanel();
 
     expect((new SidekickInsights)->getTitle())->toBe('Assistant insights')
-        ->and((new NyraInsights)->getTitle())->toBe('Nyra Insights');
+        ->and((new AssistantInsights)->getTitle())->toBe('Assistant Insights');
 });
 
 it('lets a subclass choose its own widgets', function () {
     onPanel();
 
-    $widgets = (fn () => $this->getHeaderWidgets())->call(new NyraInsights);
+    $widgets = (fn () => $this->getHeaderWidgets())->call(new AssistantInsights);
 
     expect($widgets)->toBe([UsageOverview::class, CustomRecentRuns::class])
         ->not->toContain(TenantUsage::class);
@@ -98,10 +94,9 @@ it('registers the subclass instead of the packaged page, not as well as', functi
     registerFilamentPanels(app());
 
     $panel = Filament::getPanel('testing');
-    SidekickPlugin::make()->enableInsights()->insightsPage(NyraInsights::class)->register($panel);
+    SidekickPlugin::make()->enableInsights()->insightsPage(AssistantInsights::class)->register($panel);
 
-    expect($panel->getPages())->toContain(NyraInsights::class)
-        // Registering both would put two entries in the sidebar.
+    expect($panel->getPages())->toContain(AssistantInsights::class)
         ->not->toContain(SidekickInsights::class);
 });
 
@@ -109,15 +104,13 @@ it('still gates a subclass through canAccess', function () {
     registerFilamentPanels(app());
     config()->set('sidekick.insights.enabled', false);
 
-    // Access is inherited, so a subclass cannot accidentally open the page up.
-    expect(NyraInsights::canAccess())->toBeFalse();
+    expect(AssistantInsights::canAccess())->toBeFalse();
 });
 
 it('renders a host subclass that overrides just one column', function () {
     onPanel();
     customRun(userId: 7);
 
-    // The short path: change the cell, inherit everything else.
     Livewire::test(CustomRecentRuns::class)
         ->assertOk()
         ->assertSee('Employee')
@@ -161,7 +154,6 @@ it('falls back to the id when the label attribute does not exist', function () {
     $acme = Employee::query()->create([]);
     Insights::forgetLabels();
 
-    // A missing column degrades to the id rather than blanking the page.
     expect(Insights::tenantLabel((string) $acme->getKey()))->toBe((string) $acme->getKey());
 });
 
@@ -173,7 +165,6 @@ it('finds the user model from the panel guard, with no config', function () {
     });
 
     onPanel();
-    // The guard's provider model is the user model; nothing about Sidekick needs restating.
     config()->set('auth.providers.users.model', Employee::class);
 
     $person = Employee::query()->create(['name' => 'Aria Whitfield']);
@@ -199,7 +190,6 @@ it('resolves a name that is an accessor rather than a column', function () {
     customRun(userId: (int) $person->getKey());
     Insights::forgetLabels();
 
-    // `select name` would fail here — there is no such column, only getNameAttribute().
     expect(Insights::userLabel((string) $person->getKey()))->toBe('Aria Whitfield');
 
     Insights::forgetLabels();
@@ -237,7 +227,6 @@ it('resolves a page of rows in one query rather than one per row', function () {
     Insights::primeUserLabels($ids);
     collect($ids)->each(fn ($id) => Insights::userLabel($id));
 
-    // One batch for five people, and the per-id calls afterwards are all cache hits.
     expect($queries)->toBe(1);
 });
 
@@ -285,10 +274,8 @@ it('keeps the aggregate in a subquery so the outer sort has no GROUP BY to fight
     $query = (fn () => $this->query())->call(new TenantUsage);
     $sql = $query->toSql();
 
-    // Filament appends `order by <sort>, sidekick_runs.id` to every sort. Against a grouped query MySQL's
-    // only_full_group_by rejects that, so the grouping has to live one level down.
+    // MySQL's only_full_group_by rejects Filament's appended `order by <sort>, sidekick_runs.id` on a grouped query.
     expect($sql)->toMatch('/^select \* from \(select .* group by .*\) as /i')
-        // Exactly one, and it belongs to the subquery — the outer select must stay ungrouped.
         ->and(substr_count(strtolower($sql), 'group by'))->toBe(1)
         ->and(Str::afterLast($sql, ') as '))->not->toContain('group by');
 });

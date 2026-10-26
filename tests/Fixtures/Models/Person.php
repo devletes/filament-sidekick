@@ -4,10 +4,7 @@ namespace Devletes\Sidekick\Tests\Fixtures\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-/**
- * A user model shaped like a real one: `name` is computed from first_name/last_name and is not a column, so
- * asking SQL for it fails. Stands in for every app whose display name is an accessor.
- */
+/** `name` is an accessor, not a column, so selecting it in SQL fails. */
 class Person extends Model
 {
     protected $table = 'people';

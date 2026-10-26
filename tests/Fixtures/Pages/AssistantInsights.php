@@ -8,10 +8,9 @@ use Devletes\Sidekick\Tests\Fixtures\Widgets\CustomRecentRuns;
 use Devletes\Sidekick\Widgets\UsageOverview;
 use UnitEnum;
 
-/** A host renaming and reshaping the page the ordinary Filament way — no package API involved. */
-class NyraInsights extends SidekickInsights
+class AssistantInsights extends SidekickInsights
 {
-    protected static ?string $navigationLabel = 'Nyra Insights';
+    protected static ?string $navigationLabel = 'Assistant Insights';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-sparkles';
 
@@ -19,7 +18,7 @@ class NyraInsights extends SidekickInsights
 
     protected static string|UnitEnum|null $navigationGroup = 'Reports';
 
-    protected static ?string $slug = 'nyra-usage';
+    protected static ?string $slug = 'assistant-usage';
 
     protected static bool $shouldRegisterNavigation = false;
 

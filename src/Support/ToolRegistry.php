@@ -36,8 +36,7 @@ class ToolRegistry
     }
 
     /**
-     * What is actually handed to the model. Direct mode offers every authorized tool; catalog mode offers
-     * ListTools + RunTool instead, so the request carries two definitions rather than sixty.
+     * Catalog mode swaps the authorized tools for ListTools + RunTool to keep the request small.
      *
      * @return ChatTool[]
      */
@@ -49,8 +48,7 @@ class ToolRegistry
             return $tools;
         }
 
-        // Built-ins stay direct: their calls are read back from storage afterwards, which only works while
-        // they are recorded under their own name.
+        // Built-ins stay direct: their calls are read back from storage by their own name.
         $direct = array_values(array_filter(
             $tools,
             fn (ChatTool $tool): bool => $tool instanceof AlwaysOffered,
@@ -64,8 +62,6 @@ class ToolRegistry
     }
 
     /**
-     * The tools RunTool may dispatch — everything the user is authorized for that is not offered directly.
-     *
      * @return ChatTool[]
      */
     public function catalogueableFor(?Authenticatable $user): array
@@ -77,8 +73,6 @@ class ToolRegistry
     }
 
     /**
-     * The catalog ListTools returns: name, description and parameters per tool.
-     *
      * @return array<int, array{name: string, description: string, parameters: array<string, mixed>}>
      */
     public function catalogFor(?Authenticatable $user): array
@@ -91,8 +85,6 @@ class ToolRegistry
     }
 
     /**
-     * Whether this turn runs in catalog mode: switched on outright, or past the size where the trade pays off.
-     *
      * @param  ChatTool[]  $tools
      */
     protected function usesCatalog(array $tools): bool
@@ -111,8 +103,7 @@ class ToolRegistry
     }
 
     /**
-     * A tool's parameters as JSON Schema, with `required` folded onto each property so the catalog reads as
-     * one flat block per tool.
+     * `required` is folded onto each property so the catalog reads as one flat block per tool.
      *
      * @return array<string, mixed>
      */
@@ -138,7 +129,6 @@ class ToolRegistry
         return $parameters;
     }
 
-    /** Standing guidance from the tools offered to this user; fragments are deduplicated and joined in stable registry order. */
     public function instructionsFor(?Authenticatable $user): string
     {
         $fragments = collect($this->authorizedFor($user))
@@ -152,7 +142,6 @@ class ToolRegistry
             : "Tool guidance:\n".$fragments->join("\n\n");
     }
 
-    /** What the offered tools have to say about this turn (Contracts\ProvidesTurnContext), in registry order. */
     public function turnContextFor(?Authenticatable $user): string
     {
         return collect($this->authorizedFor($user))
@@ -164,9 +153,7 @@ class ToolRegistry
     }
 
     /**
-     * The tool a recorded call actually ran: itself in direct mode, or the inner tool when it went through
-     * RunTool. Everything that reads back a recorded call — activity lines, message buttons — goes through
-     * this, so catalog mode stays invisible outside the registry.
+     * Sees through RunTool to the inner tool; all call read-back goes through here so catalog mode stays invisible.
      *
      * @param  array<string, mixed>  $arguments
      */
@@ -187,16 +174,14 @@ class ToolRegistry
         return is_string($inner) && trim($inner) !== '' ? trim($inner) : $name;
     }
 
-    /** Status line for a recorded call, seeing through a RunTool call to the tool it actually ran. */
     public function labelForCall(?string $name, mixed $arguments = []): ?string
     {
         return $this->labelFor(static::ranTool($name, $arguments));
     }
 
-    /** Status line for a tool by its model-facing name (as recorded in run activity). */
     public function labelFor(string $toolName): ?string
     {
-        // The catalog pair is constructed per turn rather than registered, so it is searched alongside.
+        // The catalog pair is built per turn rather than registered, so it is searched alongside.
         foreach ([...$this->manager->toolInstances(), new ListTools, new RunTool] as $tool) {
             if (ToolNameResolver::resolve($tool) === $toolName) {
                 return $tool->label();
@@ -213,7 +198,7 @@ class ToolRegistry
             || ($panelId !== null && in_array($panelId, $panels, true));
     }
 
-    /** The serving panel (web) or the restored dispatch panel (queued turns — see PanelContext). */
+    /** On queued turns this is the dispatch panel restored by PanelContext. */
     protected function currentPanelId(): ?string
     {
         try {

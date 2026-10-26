@@ -7,24 +7,15 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use InvalidArgumentException;
 
-/**
- * A confirmable write action. Sidekick automatically offers it to the model
- * as a "Propose{{ class }}" tool; the model can only PROPOSE — execute() runs
- * exclusively from the user's Confirm click on the card in the panel.
- */
+/** Offered to the model as Propose{{ class }}; execute() runs only on the user's Confirm click. */
 class {{ class }} extends SidekickAction
 {
-    /** Tells the model what this action changes and when to propose it. */
     public function description(): string
     {
         return 'Describe what this action does.';
     }
 
-    /**
-     * The payload the model must supply when proposing.
-     *
-     * @return array<string, \Illuminate\JsonSchema\Types\Type>
-     */
+    /** @return array<string, \Illuminate\JsonSchema\Types\Type> */
     public function schema(JsonSchema $schema): array
     {
         return [
@@ -34,11 +25,7 @@ class {{ class }} extends SidekickAction
         ];
     }
 
-    /**
-     * Validate + normalize the payload and describe the confirm card. Throw
-     * InvalidArgumentException with a user-readable message for anything
-     * invalid — the model receives it and can correct itself.
-     */
+    /** Throw InvalidArgumentException with a user-readable message; the model sees it and can correct itself. */
     public function prepare(array $payload, Authenticatable $user): array
     {
         $name = trim((string) ($payload['name'] ?? ''));
@@ -53,17 +40,12 @@ class {{ class }} extends SidekickAction
             'preview' => [
                 ['label' => 'Name', 'value' => $name],
             ],
-            // Ask for a file on the confirm card (ids arrive in
-            // $payload['attachment_ids'] at execute time):
+            // Ask for a file on the card; ids arrive in $payload['attachment_ids'] at execute time:
             // 'upload' => ['required' => false, 'label' => 'Attachment', 'multiple' => false],
         ];
     }
 
-    /**
-     * Runs on the user's Confirm click, under their real session — always
-     * re-validate against live data. Returns a short outcome line for the
-     * card, e.g. "Created."
-     */
+    /** Runs under the user's session on Confirm: re-validate against live data, return a short outcome line. */
     public function execute(array $payload, Authenticatable $user): string
     {
         // Thing::create(['name' => $payload['name'], ...]);
@@ -71,32 +53,15 @@ class {{ class }} extends SidekickAction
         return 'Done.';
     }
 
-    // Show the confirmation in a modal instead of inline in the panel —
-    // worth it when the preview is too tall or wide for a 23rem dock:
-    //
+    // Confirm in a modal instead of inline, for previews too large for the dock:
     // public function confirmation(): \Devletes\Sidekick\Enums\ConfirmationMode
     // {
     //     return \Devletes\Sidekick\Enums\ConfirmationMode::Modal;
     // }
 
-    // Name what this action cannot work without — the model it writes, the
-    // resource it belongs to. Delete one and the action stops being offered
-    // and stops being confirmable, rather than failing at execute() time;
-    // `php artisan sidekick:check` reports it:
-    //
+    // Withhold the action if these classes are deleted; `php artisan sidekick:check` reports it:
     // public function dependsOn(): array
     // {
     //     return [Thing::class];
     // }
-
-    // Conventions you can override:
-    // - type():         defaults to the snake_cased class name
-    // - label():        status line while the proposal is prepared
-    // - authorize():    who may propose this action (default: everyone)
-    // - instructions(): standing system prompt guidance while the proposal
-    //                   tool is offered — hard-coded text only
-    // - panels():       panel ids whose assistant offers this action
-    //                   (default: ['*'] = every panel)
-    // - confirmation(): inline (default) or modal presentation
-    // - dependsOn():    classes whose deletion should withhold this action
 }

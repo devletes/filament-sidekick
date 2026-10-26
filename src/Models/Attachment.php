@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Storage;
 
-/** A chat upload, stored temporarily on a host-configured disk and swept by sidekick:prune-attachments; only name/mime/size metadata ever reaches the model. */
+/** Only name/mime/size metadata ever reaches the model. */
 class Attachment extends Model
 {
     use HasUuids;
@@ -15,7 +15,6 @@ class Attachment extends Model
     /** Uploaded from the composer/card but not yet part of a sent message. */
     public const STATUS_STAGED = 'staged';
 
-    /** Sent with a message — part of the conversation record. */
     public const STATUS_SENT = 'sent';
 
     protected $guarded = [];
@@ -31,7 +30,6 @@ class Attachment extends Model
         return $query->where('user_id', $user->getAuthIdentifier());
     }
 
-    /** Metadata shape shared by run payloads, message rows, and the panel chips. */
     public function toMetadata(): array
     {
         return [
@@ -60,7 +58,7 @@ class Attachment extends Model
             $storage = Storage::disk($this->disk);
             $storage->delete($this->path);
 
-            // Remove the upload's uuid folder once empty; guarded on emptiness in case a host configured a flat layout.
+            // Guarded on emptiness in case a host configured a flat layout.
             $directory = dirname($this->path);
 
             if ($directory !== '.'

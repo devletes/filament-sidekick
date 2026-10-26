@@ -8,17 +8,12 @@ use Laravel\Ai\Tools\Request;
 
 class {{ class }} extends ChatToolBase
 {
-    /** Tells the model what this tool does and when to call it. */
     public function description(): string
     {
         return 'Describe what this tool looks up.';
     }
 
-    /**
-     * The arguments the model must supply.
-     *
-     * @return array<string, \Illuminate\JsonSchema\Types\Type>
-     */
+    /** @return array<string, \Illuminate\JsonSchema\Types\Type> */
     public function schema(JsonSchema $schema): array
     {
         return [
@@ -28,51 +23,36 @@ class {{ class }} extends ChatToolBase
         ];
     }
 
-    /** Status line shown in the panel while the tool runs. */
     public function label(): string
     {
         return 'Looking that up';
     }
 
-    // Restrict who is offered this tool (unauthorized users never see it):
-    //
+    // Restrict who is offered this tool:
     // public function authorize(\Illuminate\Contracts\Auth\Authenticatable $user): bool
     // {
     //     return $user->can('viewAny', Thing::class);
     // }
 
-    // Standing guidance added to the system prompt while this tool is offered.
-    // Hard-coded text only — never interpolate user or record data:
-    //
+    // System prompt guidance while offered; hard-coded text only, never user or record data:
     // public function instructions(): ?string
     // {
     //     return 'Always search before answering questions about projects.';
     // }
 
     // Limit to specific panels' assistants (default: every panel):
-    //
     // public function panels(): array
     // {
     //     return ['admin'];
     // }
 
-    // Name what this tool cannot work without — the resource it queries, the
-    // model it reads. Delete one and the tool is withheld from the assistant
-    // rather than fataling mid-turn, and `php artisan sidekick:check` reports
-    // it. Run `sidekick:check --uses=App\Models\Thing` before deleting
-    // something to see which tools go with it:
-    //
+    // Withhold the tool if these classes are deleted; `php artisan sidekick:check` reports it:
     // public function dependsOn(): array
     // {
     //     return [Thing::class];
     // }
 
-    /**
-     * Read-only work happens here; $this->user is the chatting user — scope
-     * every query to them. Return compact data for the model (respond()
-     * JSON-encodes it). For write operations make a SidekickAction instead:
-     * php artisan sidekick:action
-     */
+    /** Read-only: scope every query to $this->user; for writes use a SidekickAction (php artisan sidekick:action). */
     public function handle(Request $request): string
     {
         // $results = Thing::query()

@@ -4,7 +4,7 @@ namespace Devletes\Sidekick\Assets;
 
 use Filament\Support\Assets\Css;
 
-/** Filament versions assets by composer package version, which never moves for a path-repo symlink — version by content instead so edits bust the cache. */
+/** Filament versions by package version, which never moves for a path-repo symlink, so version by content. */
 class HashedCss extends Css
 {
     public function getVersion(): string

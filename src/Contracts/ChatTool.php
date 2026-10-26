@@ -5,13 +5,13 @@ namespace Devletes\Sidekick\Contracts;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Laravel\Ai\Contracts\Tool;
 
-/** A read tool the panel's assistant can call (extend Support\ChatToolBase for defaults); writes belong in a ProposableAction instead. */
+/** A read tool the assistant can call (extend Support\ChatToolBase); writes belong in a ProposableAction. */
 interface ChatTool extends Tool
 {
-    /** Binds the acting user before handle() runs — queued turns have no auth() session, so this is the only reliable source. */
+    /** Queued turns have no auth() session, so this is the only reliable source of the acting user. */
     public function forUser(Authenticatable $user): static;
 
-    /** Whether the given user may use this tool at all (unauthorized tools are never offered to the model). */
+    /** Unauthorized tools are never offered to the model. */
     public function authorize(Authenticatable $user): bool;
 
     /** Short present-continuous status line shown while the tool runs, e.g. "Checking your leave balance". */
@@ -21,15 +21,14 @@ interface ChatTool extends Tool
     public function instructions(): ?string;
 
     /**
-     * Filament panel ids whose assistant offers this tool; ['*'] (default) = every panel, and only '*' tools are offered outside panel context.
+     * ['*'] (default) = every panel; only '*' tools are offered outside panel context.
      *
      * @return array<int, string>
      */
     public function panels(): array;
 
     /**
-     * Classes this tool cannot work without — the resource it queries, the model it reads, a service it calls.
-     * Delete one and the tool is withheld rather than fataling mid-turn, and `sidekick:check` names the file.
+     * A missing dependency withholds the tool instead of fataling mid-turn.
      *
      * @return array<int, class-string>
      */

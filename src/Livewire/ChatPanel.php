@@ -21,6 +21,7 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
+use Laravel\Ai\Enums\MessageStatus;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
@@ -34,13 +35,11 @@ class ChatPanel extends Component
 
     public string $draft = '';
 
-    /** Transient Livewire temp uploads from the composer's file input. */
     public array $uploads = [];
 
     /** Persisted Attachment ids staged for the next message. */
     public array $staged = [];
 
-    /** Transient Livewire temp uploads from the confirm card's file input. */
     public array $cardUploads = [];
 
     /** Persisted Attachment ids uploaded on the live confirm card. */
@@ -48,7 +47,6 @@ class ChatPanel extends Component
 
     public ?string $uploadError = null;
 
-    /** Whether the modal-mode confirm card is currently on screen. */
     public bool $actionModalOpen = false;
 
     /** The modal-mode action last seen by a render, so only a newly proposed one re-opens the modal. */
@@ -59,7 +57,7 @@ class ChatPanel extends Component
 
     public function mount(): void
     {
-        // Deliberately empty: the panel opens on a fresh chat; the last conversation is one click away (resumeConversation).
+        // Deliberately empty: the panel opens on a fresh chat; resumeConversation() restores the last one.
     }
 
     public function resumeConversation(): void
@@ -77,7 +75,6 @@ class ChatPanel extends Component
         $this->forgetActionModal();
     }
 
-    /** Open a past conversation from the history dropdown. */
     public function openConversation(string $conversationId): void
     {
         if (! $this->historyEnabled() || ! auth()->check()) {
@@ -100,11 +97,7 @@ class ChatPanel extends Component
         $this->forgetActionModal();
     }
 
-    /**
-     * The user's most recent conversations in this profile, newest first.
-     *
-     * @return Collection<int, Conversation>
-     */
+    /** @return Collection<int, Conversation> */
     public function recentConversations(): Collection
     {
         if (! $this->historyEnabled() || ! auth()->check()) {
@@ -124,11 +117,7 @@ class ChatPanel extends Component
         return (bool) config('sidekick.history.enabled', false);
     }
 
-    /**
-     * The serving tenant, stamped onto every run. Conversations already carry one when the host's
-     * SidekickContext sets it; runs carry their own so limits and insights can scope without a join, and
-     * without depending on the host having implemented that seam.
-     */
+    /** Stamped onto every run so limits and insights can scope by tenant without a join or a host SidekickContext. */
     protected function tenantKey(): ?string
     {
         try {
@@ -173,7 +162,6 @@ class ChatPanel extends Component
             return;
         }
 
-        // A live confirm card must be answered (or expire) before chatting on.
         if ($this->activeAction() !== null) {
             return;
         }
@@ -254,13 +242,11 @@ class ChatPanel extends Component
         $this->dispatch('sidekick-jump-to-end');
     }
 
-    /** Composer file input — files persist to Attachment rows immediately. */
     public function updatedUploads(): void
     {
         $this->stageUploads('uploads', 'staged');
     }
 
-    /** Confirm-card file input. */
     public function updatedCardUploads(): void
     {
         $this->stageUploads('cardUploads', 'cardStaged');
@@ -276,7 +262,7 @@ class ChatPanel extends Component
         $this->discardStaged($attachmentId, 'cardStaged');
     }
 
-    /** Detach an attachment from the live proposal's payload; the attachment itself stays in the conversation record. */
+    /** Detaches from the proposal payload only; the attachment itself stays in the conversation. */
     public function removeProposalAttachment(string $actionId, string $attachmentId): void
     {
         $action = $this->ownedAction($actionId);
@@ -354,11 +340,7 @@ class ChatPanel extends Component
         $this->{$target} = array_values(array_diff($this->{$target}, [$attachmentId]));
     }
 
-    /**
-     * The staged ids re-proven against the database (ownership + still staged), in staging order.
-     *
-     * @return Collection<int, Attachment>
-     */
+    /** @return Collection<int, Attachment> */
     protected function stagedRows(string $target = 'staged'): Collection
     {
         if ($this->{$target} === [] || ! auth()->check()) {
@@ -405,12 +387,9 @@ class ChatPanel extends Component
         $conversation = new Conversation([
             ...app(SidekickContext::class)->attributes($user),
             'user_id' => $user->getAuthIdentifier(),
-            // laravel/ai ≥ 0.10 keys the owner polymorphically; written alongside
-            // user_id so its participant lookups and the messages it stores agree.
-            ...(method_exists(Conversation::class, 'participantType') ? [
-                'participant_type' => Conversation::participantType($user),
-                'participant_id' => Conversation::participantKey($user),
-            ] : []),
+            // laravel/ai keys the owner polymorphically; must agree with user_id for its participant lookups.
+            'participant_type' => Conversation::participantType($user),
+            'participant_id' => Conversation::participantKey($user),
             'profile' => app(Profiles::class)->current(),
             'title' => Str::limit($firstMessage, 60, preserveWords: true),
         ]);
@@ -466,6 +445,8 @@ class ChatPanel extends Component
         $messages = $conversation
             ? ConversationMessage::query()
                 ->where('conversation_id', $conversation->id)
+                // A turn that threw is stored for the model's sake; the panel reports it from its run instead.
+                ->where('status', '!=', MessageStatus::Failed->value)
                 ->orderByDesc('id')
                 ->limit((int) config('sidekick.display_limit', 60))
                 ->get()
@@ -489,9 +470,7 @@ class ChatPanel extends Component
         $pendingActions = $this->pendingActions();
         $activeAction = $pendingActions->first(fn ($action) => $action->isConfirmable());
 
-        // A modal card opens itself when proposed mid-session. On a page load the
-        // component is unprimed, so it stays shut and the dock offers a link back
-        // in — an unexpected modal on load reads as a trap.
+        // Auto-open only mid-session; on page load (unprimed) the dock links back instead of springing a modal.
         if ($activeAction?->rendersInModal() && $this->actionModalPrimed && $this->actionModalId !== $activeAction->id) {
             $this->actionModalOpen = true;
         }
@@ -499,9 +478,7 @@ class ChatPanel extends Component
         $this->actionModalId = $activeAction?->rendersInModal() ? $activeAction->id : null;
         $this->actionModalPrimed = true;
 
-        // One chronological stream: outcome lines sort with the turn that proposed them, not clumped after the messages.
-        // A turn's messages are only stored when it ends, after the card was proposed, so a line sorts from the end
-        // of its run: after that turn's prompt and reply rather than above the prompt.
+        // Outcome lines sort by their run's end, since a turn's messages are only stored once it finishes.
         $runEnds = Run::query()
             ->whereKey($pendingActions->pluck('run_id')->filter()->unique()->values())
             ->whereNotNull('finished_at')
@@ -564,7 +541,6 @@ class ChatPanel extends Component
         ]);
     }
 
-    /** Greets by first name when the user model exposes one, in any of Filament's usual shapes. */
     protected function greeting(string $assistantName): string
     {
         $user = auth()->user();
@@ -650,7 +626,6 @@ class ChatPanel extends Component
 
             $this->acknowledge($action, __('sidekick::messages.acknowledge.failed', ['reason' => $action->result]));
         } finally {
-            // Either way the card leaves the screen; its upload state goes with it.
             $this->cardUploads = [];
             $this->cardStaged = [];
             $this->actionModalOpen = false;
@@ -667,7 +642,6 @@ class ChatPanel extends Component
         if ($action && $action->isConfirmable()) {
             $action->update(['status' => PendingAction::STATUS_CANCELLED]);
 
-            // Files uploaded on the card served nothing — remove them.
             foreach ($this->stagedRows('cardStaged') as $attachment) {
                 $attachment->deleteWithFile();
             }
@@ -684,7 +658,7 @@ class ChatPanel extends Component
         }
     }
 
-    /** Payload with card-uploaded ids merged into `attachment_ids` (claimed as sent so they survive pruning), or null when a required upload is missing. */
+    /** Card uploads are claimed as sent so they survive pruning; null when a required upload is missing. */
     protected function payloadWithCardAttachments(PendingAction $action): ?array
     {
         $payload = $action->payload ?? [];
@@ -721,10 +695,11 @@ class ChatPanel extends Component
             'role' => 'assistant',
             'content' => $text,
             'attachments' => [],
-            'tool_calls' => [],
-            'tool_results' => [],
+            // One plain step, as laravel/ai stores a reply that called no tools, so the history replays it.
+            'steps' => [['content' => $text, 'tool_calls' => [], 'reasoning' => '', 'replay_blocks' => [], 'provider_tool_calls' => []]],
             'usage' => [],
             'meta' => ['sidekick_ack' => true],
+            'status' => MessageStatus::Completed,
         ]);
         $message->id = (string) Str::uuid7();
         $message->save();
@@ -779,11 +754,7 @@ class ChatPanel extends Component
             ->values();
     }
 
-    /**
-     * Attachments the proposal's payload references (`attachment_ids`), rendered as chips on the card.
-     *
-     * @return Collection<int, Attachment>
-     */
+    /** @return Collection<int, Attachment> */
     protected function payloadAttachmentRows(PendingAction $action): Collection
     {
         $ids = array_values(array_filter((array) ($action->payload['attachment_ids'] ?? []), 'is_string'));
@@ -843,17 +814,12 @@ class ChatPanel extends Component
         }
     }
 
-    /** True when the run finished recently enough that a redirect still makes sense. */
     protected function navigationIsFresh(Run $run): bool
     {
         return $run->finished_at !== null && $run->finished_at->gt(now()->subMinutes(2));
     }
 
-    /**
-     * Action buttons from the message's persisted PresentActions tool call, re-resolved (re-authorized) at render time.
-     *
-     * @return array<int, array{label: string, url: string, external: bool}>
-     */
+    /** @return array<int, array{label: string, url: string, external: bool}> */
     public function messageActions(ConversationMessage $message): array
     {
         $user = auth()->user();

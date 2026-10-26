@@ -26,7 +26,7 @@ seeders:
 
 workbench:
   start: '/admin'
-  user: aria@example.com
+  user: salman@example.com
   install: true
   health: false
   discovers:

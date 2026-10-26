@@ -1,37 +1,21 @@
-/* ============================================================
-   Filament Sidekick — push-aside assistant panel.
-
-   Chrome (buttons, badges, inputs, callouts, empty state, icons)
-   comes from Filament's own Blade components, so it follows the
-   host panel's theme automatically. What lives here is the panel
-   GEOMETRY plus the few chat primitives Filament has no component
-   for (bubbles, activity rows, the confirm card).
-
-   THEMING: override any --sidekick-* property below in your
-   panel theme's CSS — declare it on `body` (or any closer
-   element) and it wins over these defaults. Nothing here needs
-   a PHP API to restyle.
-   ============================================================ */
+/* Theming: override any --sidekick-* property on body (or a closer element) in your panel theme. */
 
 html {
-    /* Geometry — width is also settable from config (sidekick.panel.*). */
+    /* Width is also settable via sidekick.panel.width. */
     --sidekick-width: 23rem;
     --sidekick-top: 4rem;
     --sidekick-height: calc(100dvh - 4rem);
     --sidekick-edge-offset: 0px;
 
-    /* Surfaces */
     --sidekick-bg: #fff;
     --sidekick-border: color-mix(in srgb, var(--gray-950, #030712) 8%, transparent);
     --sidekick-text: var(--gray-900, rgb(17 24 39));
     --sidekick-muted: var(--gray-500, rgb(107 114 128));
 
-    /* Message bubbles — neutral by default; primary is reserved for actions. */
     --sidekick-bubble-user-bg: color-mix(in srgb, var(--gray-950, #030712) 8%, transparent);
     --sidekick-bubble-assistant-bg: color-mix(in srgb, var(--gray-950, #030712) 4%, transparent);
     --sidekick-bubble-radius: var(--radius-xl, 0.75rem);
 
-    /* Composer button column: 2.25rem square by default. */
     --sidekick-composer-field-min: calc(var(--spacing, 0.25rem) * 19.5);
     --sidekick-composer-btn-px: calc(var(--spacing, 0.25rem) * 2);
     --sidekick-composer-btn-min: calc(var(--spacing, 0.25rem) * 9);
@@ -92,9 +76,7 @@ body.sidekick-full-height .sidekick-card {
     height: 100dvh;
 }
 
-/* Native Filament keeps the topbar outside the row the panel squeezes, so push
-   it by hand and let the aside climb past it. Themes that render the topbar
-   inside .fi-main-ctn never get the body class — it already shrinks there. */
+/* Native Filament keeps the topbar outside the squeezed row, so push it by hand; inside-.fi-main-ctn themes skip this. */
 body.sidekick-full-height.sidekick-topbar-outside .sidekick-aside {
     margin-top: calc(-1 * var(--sidekick-topbar-height, 4rem));
 }
@@ -323,7 +305,6 @@ body.sidekick-ready.sidekick-topbar-outside .fi-topbar-ctn {
 
 /* --- Confirm cards ----------------------------------------- */
 
-/* The dock replaces the composer while a card awaits an answer. */
 .sidekick-action-dock {
     padding: calc(var(--spacing, 0.25rem) * 3);
     border-top: 1px solid var(--sidekick-border);

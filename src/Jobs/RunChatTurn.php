@@ -52,10 +52,10 @@ class RunChatTurn implements ShouldQueue
     {
         $this->onQueue(config('sidekick.jobs.queue'));
 
-        // Must outlive the provider call; the queue's retry_after must in turn exceed this, or a slow turn gets redelivered mid-stream.
+        // Must outlive the provider call; the queue's retry_after must exceed this or a slow turn is redelivered mid-stream.
         $this->timeout = (int) config('sidekick.timeout', 120) + 60;
 
-        // Captured at dispatch: the web request knows the serving panel + tenant; the queue worker doesn't.
+        // Captured at dispatch: the queue worker doesn't know the serving panel + tenant.
         $this->filamentContext ??= PanelContext::capture();
     }
 
@@ -67,10 +67,9 @@ class RunChatTurn implements ShouldQueue
             return;
         }
 
-        // The turn runs under the profile its conversation was started in, regardless of which worker picks the job up.
+        // Run under the conversation's own profile, whichever worker picks the job up.
         app(Profiles::class)->apply($run->conversation?->profile);
 
-        // Restore the dispatching request's panel + tenant so panel/tenant-scoped tools behave as in the panel.
         PanelContext::apply(
             $this->filamentContext['panel'] ?? null,
             $this->filamentContext['tenant'] ?? null,
@@ -84,7 +83,7 @@ class RunChatTurn implements ShouldQueue
         $run->refresh();
         $this->notify($run);
 
-        // Authoritative usage-limit check (the panel's is only fail-fast UX); runs after context setup so limiters see the tenant.
+        // Authoritative check (the panel's is fail-fast UX); runs after context setup so limiters see the tenant.
         $denial = app(UsageLimiter::class)
             ->check($this->resolveUser($run), $run->conversation_id);
 
@@ -101,7 +100,6 @@ class RunChatTurn implements ShouldQueue
             return;
         }
 
-        // Fresh per-turn scratch state; tools write into it (e.g. navigation intent) and the outcome lands on the run below.
         app()->forgetInstance(RunContext::class);
         $context = app()->instance(
             RunContext::class,
@@ -110,7 +108,7 @@ class RunChatTurn implements ShouldQueue
         $context->conversationId = $run->conversation_id;
         $context->runId = $run->id;
 
-        // Decided with the turn's own context live, as the limiter was: an exempt turn is logged but not counted.
+        // Decided with the turn's context live; an exempt turn is logged but not counted.
         $metered = ! app(UsageExemptions::class)->exempt($this->resolveUser($run), $run->tenant_id);
 
         try {
@@ -122,9 +120,7 @@ class RunChatTurn implements ShouldQueue
                 'partial_content' => null,
                 'activity' => $this->activity,
                 'usage' => $this->usage,
-                // Denormalised so limits and insights can sum in SQL rather than decoding every row's JSON. What the
-                // provider processed: fresh input, output, and input written to the prompt cache. Cache reads are
-                // logged in `usage` but not counted, since they cost a fraction of fresh input.
+                // Fresh input + output + cache writes; cache reads are logged in `usage` but not counted.
                 'tokens' => ($this->usage['prompt_tokens'] ?? 0)
                     + ($this->usage['completion_tokens'] ?? 0)
                     + ($this->usage['cache_write_tokens'] ?? 0),
@@ -162,7 +158,7 @@ class RunChatTurn implements ShouldQueue
         // What changes between turns rides on the message, so the instructions stay cacheable.
         $context = method_exists($agent, 'turnContext') ? self::contextNote($agent->turnContext()) : '';
 
-        // Attachments ride as a metadata note on the prompt — file contents are never uploaded to the provider.
+        // Attachments ride as a metadata note; file contents are never uploaded to the provider.
         $prompt = $this->composeModelPrompt($run, $context);
 
         $stream = $agent->stream(
@@ -187,14 +183,14 @@ class RunChatTurn implements ShouldQueue
                 }
 
                 $this->activity[] = [
-                    // In catalog mode every call arrives as RunTool; record what it actually ran so the
-                    // panel shows "Checking your leave balance" rather than "Using RunTool".
+                    // Catalog mode reports every call as RunTool; record the tool it actually ran.
                     'type' => 'call',
                     'name' => ToolRegistry::ranTool($event->toolCall->name, $event->toolCall->arguments),
                     'at' => now()->toIso8601String(),
                 ];
                 $this->flush($run, force: true);
-            } elseif ($event instanceof ToolResult) {
+            } elseif ($event instanceof ToolResult && ! $event->preliminary) {
+                // Preliminary results are a sub-agent's progress; only the final one settles the call.
                 $this->activity[] = [
                     'type' => 'result',
                     'name' => ToolRegistry::ranTool($event->toolResult->name, $event->toolResult->arguments),
@@ -203,11 +199,12 @@ class RunChatTurn implements ShouldQueue
                 ];
                 $this->flush($run, force: true);
             } elseif ($event instanceof StreamEnd) {
+                // laravel/ai's input count includes cached input; prompt_tokens stays fresh input only.
                 $this->usage = [
-                    'prompt_tokens' => ($this->usage['prompt_tokens'] ?? 0) + $event->usage->promptTokens,
-                    'completion_tokens' => ($this->usage['completion_tokens'] ?? 0) + $event->usage->completionTokens,
-                    'cache_write_tokens' => ($this->usage['cache_write_tokens'] ?? 0) + $event->usage->cacheWriteInputTokens,
-                    'cache_read_tokens' => ($this->usage['cache_read_tokens'] ?? 0) + $event->usage->cacheReadInputTokens,
+                    'prompt_tokens' => ($this->usage['prompt_tokens'] ?? 0) + $event->usage->uncachedInputTokens(),
+                    'completion_tokens' => ($this->usage['completion_tokens'] ?? 0) + $event->usage->outputTokens,
+                    'cache_write_tokens' => ($this->usage['cache_write_tokens'] ?? 0) + ($event->usage->cacheWriteInputTokens ?? 0),
+                    'cache_read_tokens' => ($this->usage['cache_read_tokens'] ?? 0) + ($event->usage->cacheReadInputTokens ?? 0),
                 ];
             }
         }
@@ -216,16 +213,13 @@ class RunChatTurn implements ShouldQueue
         $this->repairStoredUserMessage($run, $prompt, $context);
     }
 
-    /** The note the app's turn context is sent in; stored as it is, so the history replays it unchanged. */
+    /** Stored as-is so the history replays it unchanged. */
     public static function contextNote(string $context): string
     {
         return trim($context) === '' ? '' : "[App context when this message was sent:\n".trim($context).']';
     }
 
-    /**
-     * Swap the composed prompt back for the user's clean text, which is what the panel shows, keeping the
-     * context note and any attachment metadata beside it on the row for the history to replay.
-     */
+    /** Store the user's clean text for the panel; context and attachment metadata go beside it for replay. */
     protected function repairStoredUserMessage(Run $run, string $sentPrompt, string $context): void
     {
         $attachments = $this->attachmentRows($run);
@@ -301,7 +295,7 @@ class RunChatTurn implements ShouldQueue
             ->values();
     }
 
-    /** The store joins reply text blocks with no separator; mirror the streamed paragraph breaks into the persisted message. */
+    /** The store joins text blocks with no separator; persist the streamed paragraph breaks instead. */
     protected function repairStoredReply(Run $run): void
     {
         if (! $this->textSegmented) {
@@ -321,7 +315,7 @@ class RunChatTurn implements ShouldQueue
         }
     }
 
-    /** Persist streamed progress in coarse chunks; every write also refreshes the staleness heartbeat. */
+    /** Every write also refreshes the staleness heartbeat. */
     protected function flush(Run $run, bool $force = false): void
     {
         $now = microtime(true);

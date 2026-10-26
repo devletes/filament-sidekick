@@ -25,7 +25,6 @@ class PanelContext
         }
     }
 
-    /** The user model behind a panel's auth guard; falls back to the default provider. */
     public static function userModel(?string $guard): string
     {
         $provider = $guard ? config("auth.guards.{$guard}.provider") : null;
@@ -34,10 +33,9 @@ class PanelContext
             ?? config('auth.providers.users.model');
     }
 
-    /** Always writes both panel and tenant — including clearing them — so a long-lived worker never inherits the previous job's tenant. */
+    /** Always writes both, even null, so a long-lived worker never inherits the previous job's tenant. */
     public static function apply(?string $panelId, int|string|null $tenantKey): void
     {
-        // No Filament booted (console/test contexts): nothing to restore or clear.
         if (! app()->bound('filament')) {
             if ($tenantKey !== null) {
                 throw new RuntimeException('Cannot restore tenant context: Filament is not available in this process.');

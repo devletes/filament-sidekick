@@ -59,9 +59,8 @@ it('withholds a tool whose declared dependencies no longer exist', function () {
 
     $manager = app(SidekickManager::class);
 
-    // Still registered — the class list is what sidekick:check reports on.
     expect($manager->toolClasses())->toContain(BrokenTool::class)
-        // But never offered to the model, so a deleted resource cannot fatal a turn.
+        // Never offered to the model, so a deleted resource cannot fatal a turn.
         ->and($manager->toolInstances())->each->not->toBeInstanceOf(BrokenTool::class);
 });
 

@@ -7,21 +7,12 @@ use Illuminate\Support\Collection;
 use Laravel\Ai\Messages\AssistantMessage;
 use Laravel\Ai\Messages\Message;
 use Laravel\Ai\Messages\ToolResultMessage;
-use Laravel\Ai\Responses\Data\ToolCall;
 use Laravel\Ai\Responses\Data\ToolResult;
 use Laravel\Ai\Storage\DatabaseConversationStore;
 
-/**
- * Rehydrates history lean: past tool calls are kept, but a long result is replaced by a stub (the model calls the
- * tool again for fresh data). Writes keep the full record.
- *
- * The calls themselves have to stay. A past reply like "Review the card, then Confirm" only makes sense next to the
- * proposal that produced the card; with the call stripped, the model learns from its own history that the line is
- * enough on its own, and writes it without proposing anything.
- */
+/** Long tool results are stubbed on read; calls must stay or the model learns to skip proposing. */
 class LeanConversationStore extends DatabaseConversationStore
 {
-    /** Results up to this long are kept as they were: a proposal's outcome, a short answer. */
     public const KEPT_RESULT_LENGTH = 400;
 
     public function getLatestConversationMessages(string $conversationId, int $limit): Collection
@@ -43,53 +34,32 @@ class LeanConversationStore extends DatabaseConversationStore
             ->reverse()
             ->values()
             ->flatMap(function ($record): array {
-                $content = (string) $record->content;
-
-                // Re-append the attachment note so files from past turns stay referencable without contents entering context.
                 if ($record->role === 'user') {
                     $note = $this->attachmentNote($record->attachments ?? null);
 
-                    // The app's context note goes back last, as it was sent, so the replayed message matches the cached one.
-                    $content = collect([$content, $note, (string) ($record->context ?? '')])
+                    // Context goes last, as sent, so the replayed message matches the prompt cache.
+                    $content = collect([(string) $record->content, $note, (string) ($record->context ?? '')])
                         ->filter(fn (string $part): bool => trim($part) !== '')
                         ->join("\n\n");
 
                     return trim($content) === '' ? [] : [new Message('user', $content)];
                 }
 
-                $messages = $this->toolTurn($record);
-
-                if (trim($content) !== '') {
-                    $messages[] = new AssistantMessage($content);
-                }
-
-                return $messages;
+                return $this->leanTurn($this->assistantTurnFrom($record));
             });
     }
 
     /**
-     * A reply's tool calls, each with its result, as the call and result messages the provider expects. Only calls
-     * whose result was recorded are replayed, since a call without one is refused.
-     *
+     * @param  array<int, Message>  $messages
      * @return array<int, Message>
      */
-    protected function toolTurn(object $record): array
+    protected function leanTurn(array $messages): array
     {
-        $calls = collect(json_decode((string) ($record->tool_calls ?? '[]'), true))->filter(fn ($call): bool => is_array($call) && filled($call['id'] ?? null));
-        $results = collect(json_decode((string) ($record->tool_results ?? '[]'), true))->filter(fn ($result): bool => is_array($result))->keyBy('id');
-
-        $answered = $calls->filter(fn (array $call): bool => $results->has($call['id']))->values();
-
-        if ($answered->isEmpty()) {
-            return [];
-        }
-
-        return [
-            new AssistantMessage('', $answered->map(fn (array $call): ToolCall => ToolCall::fromArray($call))->values()),
-            new ToolResultMessage($answered->map(fn (array $call): ToolResult => ToolResult::fromArray(
-                $this->leanResult($results[$call['id']]),
-            ))->values()),
-        ];
+        return array_map(fn (Message $message): Message => $message instanceof ToolResultMessage
+            ? new ToolResultMessage($message->toolResults
+                ->map(fn (ToolResult $result): ToolResult => ToolResult::fromArray($this->leanResult($result->toArray())))
+                ->values())
+            : $message, $messages);
     }
 
     /**
@@ -108,13 +78,7 @@ class LeanConversationStore extends DatabaseConversationStore
     }
 
     /**
-     * A row cap alone says nothing about prompt size — ten pasted logs dwarf ten "thanks". When a token budget
-     * is set, the history is cut to fit it.
-     *
-     * The cut moves in steps, not a message at a time. The conversation is divided from its start into pages of
-     * half the budget, and the history starts at the earliest page from which the rest fits. Where it starts
-     * therefore stays put for several turns, and a history that starts in the same place is read from the prompt
-     * cache; a window sliding one message per turn would change its start, and miss the cache, on every turn.
+     * Cuts in half-budget pages so the history start stays put across turns and keeps hitting the prompt cache.
      *
      * @param  Collection<int, Message>  $messages
      * @return Collection<int, Message>
@@ -132,7 +96,6 @@ class LeanConversationStore extends DatabaseConversationStore
         $costs = $messages->map(fn (Message $message): int => $this->costOf($message))->all();
         $page = max(1, intdiv($budget, 2));
 
-        // Where each page starts: a new one opens whenever the current one would run past half the budget.
         $starts = [0];
         $filled = 0;
 
@@ -151,8 +114,7 @@ class LeanConversationStore extends DatabaseConversationStore
             }
         }
 
-        // The last page alone is over budget: keep what fits, newest first, and always the latest message, since a
-        // single oversized turn should shrink history, not erase it.
+        // Last page alone is over budget: keep what fits newest-first, always including the latest message.
         $kept = [];
         $spent = 0;
 

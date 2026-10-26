@@ -22,7 +22,7 @@ class AttachmentStore
     }
 
     /**
-     * Accepted mime patterns (exact or `type/*`); the default MUST match the shipped config or a config missing this key silently accepts every type.
+     * The default must match the shipped config, or a config missing this key silently accepts every type.
      *
      * @return string[]
      */
@@ -31,7 +31,6 @@ class AttachmentStore
         return array_values((array) config('sidekick.attachments.accept', ['image/*', 'application/pdf']));
     }
 
-    /** Comma-joined accept list for the file input's `accept` attribute. */
     public function acceptAttribute(): string
     {
         return implode(',', $this->accept());
@@ -47,13 +46,13 @@ class AttachmentStore
     {
         $this->validate($file);
 
-        // Read all file metadata BEFORE storeAs(): same-disk storeAs MOVES the temp file, and Livewire's test mode masks post-move reads that crash in production.
+        // Read metadata before storeAs(): a same-disk storeAs moves the temp file (Livewire test mode hides this).
         $originalName = $file->getClientOriginalName() ?: 'file';
         $mime = (string) ($file->getMimeType() ?: 'application/octet-stream');
         $size = (int) $file->getSize();
         $basename = $this->safeFileName($originalName, $this->resolveExtension($file));
 
-        // A uuid folder with a sanitized original basename inside: unique on disk, human filename for path consumers.
+        // uuid folder keeps the path unique while the basename stays human-readable.
         $directory = trim((string) config('sidekick.attachments.directory', 'sidekick-attachments'), '/')
             .'/'.now()->format('Y/m')
             .'/'.Str::uuid7()->toString();
@@ -123,8 +122,6 @@ class AttachmentStore
     }
 
     /**
-     * Ownership-scoped metadata for a set of attachment ids, in id order; unknown/foreign ids are silently dropped.
-     *
      * @return array<int, array{id: string, name: string, mime: string, size: int}>
      */
     public function metadataFor(array $ids, Authenticatable $user): array

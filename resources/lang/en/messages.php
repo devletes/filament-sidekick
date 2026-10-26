@@ -72,7 +72,7 @@ return [
         'stale_run' => 'The assistant took too long to respond.',
     ],
 
-    // Shown to the person verbatim when a turn is refused, so they say what ran out and when it comes back.
+    // Shown verbatim when a turn is refused: say what ran out and when it resets.
     'limits' => [
         'tenant_requests_day' => 'Your organisation has used its assistant allowance for today. It resets at midnight.',
         'tenant_requests_month' => 'Your organisation has used its assistant allowance for this month.',

@@ -7,7 +7,7 @@ use Devletes\Sidekick\Enums\ConfirmationMode;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Str;
 
-/** Base for confirmable write actions, auto-offered as a Propose{ClassName} tool; throw \InvalidArgumentException with user-readable messages from prepare()/execute(). */
+/** Offered as a Propose{ClassName} tool; throw \InvalidArgumentException with user-readable messages from prepare()/execute(). */
 abstract class SidekickAction implements ProposableAction
 {
     public function type(): string
@@ -40,7 +40,7 @@ abstract class SidekickAction implements ProposableAction
         return ['*'];
     }
 
-    /** Name the resources and models this action writes to, and deleting one becomes a reported problem instead of a surprise. */
+    /** Resources/models this action writes to, so deleting one is reported as a problem. */
     public function dependsOn(): array
     {
         return [];

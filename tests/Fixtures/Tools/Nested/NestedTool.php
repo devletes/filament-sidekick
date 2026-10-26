@@ -6,7 +6,6 @@ use Devletes\Sidekick\Support\ChatToolBase;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Ai\Tools\Request;
 
-/** Sits a level below the discovery root — only a recursive scan finds it. */
 class NestedTool extends ChatToolBase
 {
     public function description(): string

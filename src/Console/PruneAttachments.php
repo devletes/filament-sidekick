@@ -5,7 +5,7 @@ namespace Devletes\Sidekick\Console;
 use Devletes\Sidekick\Models\Attachment;
 use Illuminate\Console\Command;
 
-/** Deletes every upload (file and row) past the retention window; chat history keeps its own metadata and consumed files live in host storage. */
+/** Safe to delete: chat history keeps its own metadata and consumed files live in host storage. */
 class PruneAttachments extends Command
 {
     protected $signature = 'sidekick:prune-attachments {--hours= : Override sidekick.attachments.prune_after_hours}';

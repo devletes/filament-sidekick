@@ -7,16 +7,14 @@
         </aside>
     @endpersist
 
-    {{-- Runs during parse so the open state applies before first paint; wire:navigate does NOT re-run this — sidekick.js re-applies on livewire:navigated. --}}
+    {{-- Runs during parse to apply state before first paint; wire:navigate skips it, so sidekick.js re-applies it. --}}
     <script>
         (function () {
             window.__sidekickBoot = {
                 width: @js(config('sidekick.panel.width', '23rem')),
                 fullHeight: @js((bool) config('sidekick.panel.full_height')),
 
-                // Native Filament renders the topbar outside the flex row the panel
-                // squeezes; themes that render it inside .fi-main-ctn (Orbit) already
-                // shrink it for free and must not be pushed twice.
+                // Themes that render the topbar inside .fi-main-ctn already shrink it; don't push it twice.
                 topbar: function () {
                     var topbar = document.querySelector('.fi-topbar-ctn');
                     var column = document.querySelector('.fi-main-ctn');

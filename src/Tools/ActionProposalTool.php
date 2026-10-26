@@ -11,7 +11,7 @@ use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Laravel\Ai\Tools\Request;
 
-/** Wraps a ProposableAction as the model-facing tool that PROPOSES it; execution only ever happens from the user's Confirm click. */
+/** Only proposes the action; execution happens solely from the user's Confirm click. */
 class ActionProposalTool extends ChatToolBase
 {
     public function __construct(protected ProposableAction $action) {}

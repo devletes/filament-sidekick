@@ -7,9 +7,7 @@ use Filament\Panel;
 use Filament\View\PanelsRenderHook;
 
 /**
- * The render hooks a panel has been given. Read by reflection rather than rendered: a panel only pushes them
- * into FilamentView when it boots, so rendering proves nothing here — and both chat views are @auth-gated,
- * which would make an empty render look like success either way.
+ * Read by reflection: hooks only reach FilamentView at boot, and the chat views are @auth-gated.
  *
  * @return array<int, string>
  */
@@ -42,7 +40,6 @@ it('registers no chat panel at all under withoutChat', function () {
 
     SidekickPlugin::make()->withoutChat()->register($panel);
 
-    // Nothing mounted means nothing for a tenant-scoped SidekickContext to fail to scope.
     expect(registeredHookNames($panel))
         ->not->toContain(PanelsRenderHook::USER_MENU_AFTER)
         ->not->toContain(PanelsRenderHook::LAYOUT_END);

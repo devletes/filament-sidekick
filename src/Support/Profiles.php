@@ -2,7 +2,7 @@
 
 namespace Devletes\Sidekick\Support;
 
-/** Named `sidekick.profiles.{name}` config overrides; every apply() starts from a base-config snapshot, so long-lived workers switch profiles without bleed. */
+/** Each apply() starts from a base-config snapshot so long-lived workers switch profiles without bleed. */
 class Profiles
 {
     protected ?array $base = null;
@@ -22,11 +22,10 @@ class Profiles
 
         config(['sidekick' => $config]);
 
-        // Unknown names fall back to base — and stamp as base, so conversations never reference a profile that doesn't resolve.
+        // Unknown names stamp as base so conversations never reference a profile that doesn't resolve.
         $this->current = $overrides !== null ? $name : null;
     }
 
-    /** The active profile name (null = base config). */
     public function current(): ?string
     {
         return $this->current;
