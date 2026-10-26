@@ -2,7 +2,9 @@
 
 All notable changes to `devletes/filament-sidekick` will be documented in this file.
 
-## [Unreleased]
+## [1.0.0] - 2026-10-25
+
+First stable release. Requires laravel/ai 1.x; existing conversations are migrated on `php artisan migrate` — see **Changed**.
 
 ### Changed
 
