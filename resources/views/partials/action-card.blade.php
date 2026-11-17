@@ -1,13 +1,25 @@
 <p class="sidekick-action-card-title">{{ $activeAction->summary }}</p>
 
-<dl class="sidekick-action-card-rows">
-    @foreach ($activeAction->preview as $row)
-        <div>
-            <dt>{{ $row['label'] ?? '' }}</dt>
-            <dd>{{ $row['value'] ?? '' }}</dd>
-        </div>
-    @endforeach
-</dl>
+@if (filled($activeAction->preview))
+    <dl class="sidekick-action-card-rows">
+        @foreach ($activeAction->preview as $row)
+            <div>
+                <dt>{{ $row['label'] ?? '' }}</dt>
+                <dd>{{ $row['value'] ?? '' }}</dd>
+            </div>
+        @endforeach
+    </dl>
+@endif
+
+@if ($cardHasForm)
+    <div wire:key="sidekick-card-form-{{ $activeAction->id }}">
+        {{ $this->cardForm }}
+    </div>
+
+    @if ($cardError)
+        <p class="sidekick-upload-error">{{ $cardError }}</p>
+    @endif
+@endif
 
 @if (($activeAction->acceptsUpload() && $attachmentsEnabled) || $cardPayloadAttachments->isNotEmpty())
     <div class="sidekick-card-upload">

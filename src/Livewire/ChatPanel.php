@@ -3,6 +3,7 @@
 namespace Devletes\Sidekick\Livewire;
 
 use Devletes\Sidekick\Contracts\ActionResolver;
+use Devletes\Sidekick\Contracts\HasConfirmationForm;
 use Devletes\Sidekick\Contracts\UsageLimiter;
 use Devletes\Sidekick\Models\Attachment;
 use Devletes\Sidekick\Models\Conversation;
@@ -14,21 +15,30 @@ use Devletes\Sidekick\Support\AttachmentStore;
 use Devletes\Sidekick\Support\Profiles;
 use Devletes\Sidekick\Support\SidekickContext;
 use Devletes\Sidekick\Support\ToolRegistry;
+use Filament\Actions\Concerns\InteractsWithActions;
+use Filament\Actions\Contracts\HasActions;
 use Filament\Facades\Filament;
 use Filament\Models\Contracts\HasName;
+use Filament\Schemas\Concerns\InteractsWithSchemas;
+use Filament\Schemas\Contracts\HasSchemas;
+use Filament\Schemas\Schema;
+use Filament\Support\Enums\Width;
 use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Laravel\Ai\Enums\MessageStatus;
 use Livewire\Component;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 use Livewire\WithFileUploads;
 
 // Deliberately NOT #[Lazy]: an eager render costs ~one exists() query and avoids a placeholder flash on open.
-class ChatPanel extends Component
+class ChatPanel extends Component implements HasActions, HasSchemas
 {
+    use InteractsWithActions;
+    use InteractsWithSchemas;
     use WithFileUploads;
 
     public ?string $conversationId = null;
@@ -47,6 +57,9 @@ class ChatPanel extends Component
 
     public ?string $uploadError = null;
 
+    /** Why execute() refused the card's form, where no field on the card is to blame. */
+    public ?string $cardError = null;
+
     public bool $actionModalOpen = false;
 
     /** The modal-mode action last seen by a render, so only a newly proposed one re-opens the modal. */
@@ -54,6 +67,12 @@ class ChatPanel extends Component
 
     /** False until the first render, which is how a page load is told apart from a proposal arriving live. */
     public bool $actionModalPrimed = false;
+
+    /** The live card's confirmation form, when its action has one ({@see HasConfirmationForm}). */
+    public ?array $cardFormData = [];
+
+    /** The action the confirmation form was last filled for, so a render refills it only for a new card. */
+    public ?string $cardFormFor = null;
 
     public function mount(): void
     {
@@ -478,6 +497,9 @@ class ChatPanel extends Component
         $this->actionModalId = $activeAction?->rendersInModal() ? $activeAction->id : null;
         $this->actionModalPrimed = true;
 
+        $formHandler = $activeAction ? $this->confirmationFormHandler($activeAction) : null;
+        $this->syncCardForm($formHandler ? $activeAction : null);
+
         // Outcome lines sort by their run's end, since a turn's messages are only stored once it finishes.
         $runEnds = Run::query()
             ->whereKey($pendingActions->pluck('run_id')->filter()->unique()->values())
@@ -530,6 +552,8 @@ class ChatPanel extends Component
             'greeting' => $this->greeting($assistantName),
             'maxPromptLength' => (int) config('sidekick.max_prompt_length', 4000),
             'actionModalId' => $this->getId().'-action',
+            'cardHasForm' => $formHandler !== null,
+            'actionModalWidth' => $formHandler?->confirmationWidth() ?? Width::Large,
             // Broadcast per user: the panel mounts on a fresh conversation, so the user id is the only stable subscription key.
             'echoChannel' => config('sidekick.broadcasting.enabled') && auth()->check()
                 ? 'sidekick.user.'.auth()->id()
@@ -592,6 +616,15 @@ class ChatPanel extends Component
             return;
         }
 
+        // What the user picked on the card; validated here, so an invalid form leaves the card live with its errors.
+        if ($handler instanceof HasConfirmationForm) {
+            if ($this->cardFormFor !== $action->id) {
+                return;
+            }
+
+            $payload['form'] = $this->getSchema('cardForm')->getState();
+        }
+
         // Atomic claim: concurrent clicks (e.g. a second tab) must not both reach execute().
         $claimed = PendingAction::query()
             ->whereKey($action->id)
@@ -601,6 +634,8 @@ class ChatPanel extends Component
         if ($claimed !== 1) {
             return;
         }
+
+        $this->cardError = null;
 
         try {
             // Executes under the user's real click + session; the handler re-validates against live data.
@@ -616,6 +651,22 @@ class ChatPanel extends Component
                 'summary' => $action->summary,
                 'result' => $action->result,
             ]));
+            $this->forgetCard();
+        } catch (ValidationException $e) {
+            // A form card stays open to be fixed; reset by query, as the claim was, since the model still reads "proposed".
+            if ($handler instanceof HasConfirmationForm) {
+                PendingAction::query()->whereKey($action->id)->update(['status' => PendingAction::STATUS_PROPOSED]);
+
+                throw $this->onCardForm($e);
+            }
+
+            $action->update([
+                'status' => PendingAction::STATUS_FAILED,
+                'result' => Str::limit(collect($e->errors())->flatten()->first() ?? $e->getMessage(), 480),
+            ]);
+
+            $this->acknowledge($action, __('sidekick::messages.acknowledge.failed', ['reason' => $action->result]));
+            $this->forgetCard();
         } catch (\Throwable $e) {
             report($e);
 
@@ -625,14 +676,43 @@ class ChatPanel extends Component
             ]);
 
             $this->acknowledge($action, __('sidekick::messages.acknowledge.failed', ['reason' => $action->result]));
-        } finally {
-            $this->cardUploads = [];
-            $this->cardStaged = [];
-            $this->actionModalOpen = false;
+            $this->forgetCard();
         }
 
         $this->dispatch('sidekick-jump-to-end');
         $this->dispatch('sidekick-focus-composer');
+    }
+
+    /** The answered card's uploads, modal and form, cleared. */
+    protected function forgetCard(): void
+    {
+        $this->cardUploads = [];
+        $this->cardStaged = [];
+        $this->actionModalOpen = false;
+        $this->forgetCardForm();
+    }
+
+    /** execute()'s errors under the fields they name; any naming no field goes on the card. */
+    protected function onCardForm(ValidationException $e): ValidationException
+    {
+        $fields = collect($this->getSchema('cardForm')->getFlatFields(withHidden: true))
+            ->map(fn ($field): string => $field->getStatePath())
+            ->values()
+            ->all();
+
+        $errors = [];
+
+        foreach ($e->errors() as $key => $messages) {
+            $path = str_starts_with($key, 'cardFormData.') ? $key : 'cardFormData.'.$key;
+
+            if (in_array($path, $fields, true)) {
+                $errors[$path] = $messages;
+            } else {
+                $this->cardError ??= (string) collect($messages)->first();
+            }
+        }
+
+        return ValidationException::withMessages($errors === [] ? ['cardFormData' => [$this->cardError]] : $errors);
     }
 
     public function cancelAction(string $actionId): void
@@ -650,12 +730,61 @@ class ChatPanel extends Component
             $this->cardStaged = [];
             $this->uploadError = null;
             $this->actionModalOpen = false;
+            $this->forgetCardForm();
 
             $this->acknowledge($action, __('sidekick::messages.acknowledge.cancelled', ['summary' => $action->summary]));
 
             $this->dispatch('sidekick-jump-to-end');
             $this->dispatch('sidekick-focus-composer');
         }
+    }
+
+    /** A refusal is about what the form held then: any change clears it. */
+    public function updatedCardFormData(): void
+    {
+        $this->resetErrorBag();
+        $this->cardError = null;
+    }
+
+    /** The live card's form: the active action's own fields, or none. */
+    public function cardForm(Schema $schema): Schema
+    {
+        $action = $this->cardFormFor ? $this->activeAction() : null;
+        $handler = $action && $action->id === $this->cardFormFor ? $this->confirmationFormHandler($action) : null;
+
+        return $schema
+            ->components($handler ? $handler->confirmationForm($action) : [])
+            ->statePath('cardFormData');
+    }
+
+    protected function confirmationFormHandler(PendingAction $action): ?HasConfirmationForm
+    {
+        $handler = app(ActionRegistry::class)->handler($action->type);
+
+        return $handler instanceof HasConfirmationForm ? $handler : null;
+    }
+
+    /** Fills the form from the payload's `form` key once per card, so a poll never undoes what the user ticked. */
+    protected function syncCardForm(?PendingAction $action): void
+    {
+        if ($action?->id === $this->cardFormFor) {
+            return;
+        }
+
+        $this->forgetCardForm();
+
+        if ($action) {
+            $this->cardFormFor = $action->id;
+            $this->getSchema('cardForm')->fill((array) ($action->payload['form'] ?? []));
+        }
+    }
+
+    protected function forgetCardForm(): void
+    {
+        $this->cardFormData = [];
+        $this->cardFormFor = null;
+        $this->cardError = null;
+        unset($this->cachedSchemas['cardForm']);
     }
 
     /** Card uploads are claimed as sent so they survive pruning; null when a required upload is missing. */

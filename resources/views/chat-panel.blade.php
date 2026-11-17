@@ -331,7 +331,7 @@
         <x-filament::modal
             :id="$actionModalId"
             teleport="body"
-            width="lg"
+            :width="$actionModalWidth"
             alignment="start"
             :close-button="false"
             :close-by-clicking-away="false"
@@ -352,4 +352,6 @@
             ></div>
         @endif
     @endif
+
+    <x-filament-actions::modals />
 </div>

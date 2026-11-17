@@ -19,6 +19,8 @@ const targets = [
     { file: 'action_outcome', user: 'salman.done@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
     { file: 'modal_dock', user: 'salman.modal@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 620 },
     { file: 'modal_card', user: 'salman.modal@example.com', path: '/admin', viewport: true, resume: true, openModal: true },
+    { file: 'edit_card', user: 'salman.edit@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 760 },
+    { file: 'form_card',user: 'salman.form@example.com', path: '/admin', selector: '.fi-modal-window', resume: true, openModal: true, isolate: true },
     { file: 'streaming', user: 'salman.streaming@example.com', path: '/admin', selector: '.sidekick-card', resume: true, isolate: true, height: 600 },
     { file: 'layout', user: 'salman@example.com', path: '/admin/orders', viewport: true, resume: true },
     { file: 'closed', user: 'salman@example.com', path: '/admin/orders', viewport: true, open: false },
@@ -67,7 +69,10 @@ async function main() {
 
     const browser = await chromium.launch();
 
-    for (const target of targets) {
+    // ONLY=form_card,modal_card recaptures just those.
+    const only = process.env.ONLY?.split(',');
+
+    for (const target of targets.filter((t) => ! only || only.includes(t.file))) {
         const context = await browser.newContext({
             viewport: { ...viewport, height: target.height ?? viewport.height },
             deviceScaleFactor: 2,
@@ -98,12 +103,16 @@ async function main() {
             await page.locator('.sidekick-action-dock button').first().click();
             await page.waitForSelector('.fi-modal-window', { timeout: 15000 });
             await page.waitForTimeout(500);
+            // The modal focuses its first field; a focus ring is not part of the picture.
+            await page.evaluate(() => document.activeElement?.blur());
         }
 
-        // Hide the page chrome so the padding band around the panel is flat background.
+        // Hide the page chrome so the padding band around the panel (or an open modal) is flat background.
         if (target.isolate) {
             await page.addStyleTag({
-                content: '.fi-topbar, .fi-main, .fi-sidebar { visibility: hidden !important; }',
+                content: target.openModal
+                    ? '.fi-topbar, .fi-main, .fi-sidebar, .sidekick-card, .fi-modal-close-overlay { visibility: hidden !important; }'
+                    : '.fi-topbar, .fi-main, .fi-sidebar { visibility: hidden !important; }',
             });
         }
 

@@ -14,6 +14,7 @@ use Illuminate\Support\Str;
 use Workbench\App\Models\Order;
 use Workbench\App\Models\Product;
 use Workbench\App\Models\User;
+use Workbench\App\Sidekick\Actions\ShipOrders;
 
 /** One account per panel state, so screenshots are deterministic and need no AI provider. */
 class DatabaseSeeder extends Seeder
@@ -26,6 +27,8 @@ class DatabaseSeeder extends Seeder
         $streaming = $this->user('salman.streaming@example.com');
         $done = $this->user('salman.done@example.com');
         $modal = $this->user('salman.modal@example.com');
+        $form = $this->user('salman.form@example.com');
+        $edit = $this->user('salman.edit@example.com');
 
         foreach ([
             ['Linen tote bag', 'TOTE-01', 4, 10],
@@ -65,6 +68,66 @@ class DatabaseSeeder extends Seeder
         $this->streamingConversation($streaming);
         $this->executedActionConversation($done);
         $this->modalCardConversation($modal);
+        $this->formCardConversation($form);
+        $this->editableCardConversation($edit);
+    }
+
+    protected function formCardConversation(User $user): void
+    {
+        $orders = Order::query()->where('status', 'paid')->orderByDesc('number')->get();
+
+        $conversation = $this->conversation($user, 'Ship the paid orders');
+
+        $this->message($conversation, $user, 'user', 'Ship everything that is paid, but hold #1041, the customer asked us to wait.');
+        $this->message(
+            $conversation,
+            $user,
+            'assistant',
+            'Select the orders to ship and confirm. I have left #1041 unselected.',
+            [['name' => 'ProposeShipOrders', 'arguments' => ['numbers' => $orders->pluck('number')->all()]]],
+        );
+
+        PendingAction::query()->create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $user->id,
+            'type' => 'ship_orders',
+            'status' => PendingAction::STATUS_PROPOSED,
+            'confirmation' => ConfirmationMode::Modal->value,
+            'summary' => 'Ship '.$orders->count().' orders',
+            'payload' => [
+                'numbers' => $orders->pluck('number')->all(),
+                'form' => ['orders' => $orders->map(fn (Order $order): array => [...ShipOrders::row($order), 'selected' => $order->number !== 1041])->all()],
+            ],
+            'preview' => [],
+            'expires_at' => now()->addDay(),
+        ]);
+    }
+
+    protected function editableCardConversation(User $user): void
+    {
+        $product = ['name' => 'Linen apron', 'sku' => 'APRON-04', 'stock' => 25, 'reorder_at' => 8];
+
+        $conversation = $this->conversation($user, 'Add the linen apron');
+
+        $this->message($conversation, $user, 'user', 'Add the new linen apron, SKU APRON-04. We got 25 in, reorder when it drops to 8.');
+        $this->message(
+            $conversation,
+            $user,
+            'assistant',
+            'Check the details and confirm. Anything I got wrong can be corrected on the card.',
+            [['name' => 'ProposeAddProduct', 'arguments' => $product]],
+        );
+
+        PendingAction::query()->create([
+            'conversation_id' => $conversation->id,
+            'user_id' => $user->id,
+            'type' => 'add_product',
+            'status' => PendingAction::STATUS_PROPOSED,
+            'summary' => 'Add a product',
+            'payload' => ['form' => $product],
+            'preview' => [],
+            'expires_at' => now()->addDay(),
+        ]);
     }
 
     protected function user(string $email, string $name = 'Salman Hijazi'): User

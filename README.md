@@ -301,6 +301,109 @@ The modal can't be clicked or escaped away — answering it is the only way out.
 <td width="50%"><img src="docs/images/modal_dock_dark.png" alt="The panel's link back into a modal confirmation (dark)"></td>
 </tr></table>
 
+### Asking for more than a yes
+
+Some confirmations need the user to pick, tick or adjust before confirming: archive these twelve records but not that one. Implement `Contracts\HasConfirmationForm` and the card draws a Filament form under its preview. `prepare()` fills it through the payload's `form` key, and what the form holds when Confirm is clicked, validated, replaces that key before `execute()` runs:
+
+```php
+use Devletes\Sidekick\Contracts\HasConfirmationForm;
+use Devletes\Sidekick\Models\PendingAction;
+use Filament\Forms\Components\Checkbox;
+use Filament\Forms\Components\Repeater;
+use Filament\Support\Enums\Width;
+
+class ArchiveNotes extends SidekickAction implements HasConfirmationForm
+{
+    public function prepare(array $payload, Authenticatable $user): array
+    {
+        return [
+            'payload' => ['form' => ['rows' => $notes->map(fn ($note) => ['id' => $note->id, 'title' => $note->title, 'selected' => true])->all()]],
+            'summary' => 'Archive '.$notes->count().' notes',
+            'preview' => [],
+        ];
+    }
+
+    public function confirmationForm(PendingAction $action): array
+    {
+        return [
+            Repeater::make('rows')->addable(false)->deletable(false)->reorderable(false)
+                ->schema([Checkbox::make('selected')->label(fn ($get) => $get('title'))]),
+        ];
+    }
+
+    public function confirmationWidth(): Width|string
+    {
+        return Width::FourExtraLarge;
+    }
+
+    public function execute(array $payload, Authenticatable $user): string
+    {
+        $ids = collect($payload['form']['rows'])->where('selected', true)->pluck('id');
+        // Re-check every id against live data: the form's state came from the browser.
+    }
+}
+```
+
+The form is filled once per card, so the panel's polling never undoes what was selected. It works inline too, but a table of rows wants the modal, sized by `confirmationWidth()`. The workbench's `ShipOrders` is a full example: a `Repeater` laid out as a table, a `Checkbox` a row, and a count under it.
+
+<table><tr>
+<td width="50%"><img src="docs/images/form_card_light.png" alt="A confirmation form: orders to ship, each selected or not (light)"></td>
+<td width="50%"><img src="docs/images/form_card_dark.png" alt="A confirmation form: orders to ship, each selected or not (dark)"></td>
+</tr></table>
+
+The same contract makes an editable preview: fill the form with what the assistant understood, return the record's own fields from `confirmationForm()`, and a misspelling is corrected on the card instead of in another message. Field rules (`required()`, `integer()`) are checked on Confirm before `execute()` runs. A check only `execute()` can make, a SKU already taken say, is thrown as a `ValidationException` keyed by the field, before anything is written: the card stays open with the message under that field, and the user corrects it and confirms again. A message keyed by no field on the form shows on the card. Any change to the form clears the messages. An action without a form that throws a `ValidationException` fails with its first message, as an `InvalidArgumentException` does.
+
+```php
+class AddProduct extends SidekickAction implements HasConfirmationForm
+{
+    public function prepare(array $payload, Authenticatable $user): array
+    {
+        return [
+            'payload' => ['form' => Arr::only($payload, ['name', 'sku', 'stock', 'reorder_at'])],
+            'summary' => 'Add a product',
+            'preview' => [],
+        ];
+    }
+
+    public function confirmationForm(PendingAction $action): array
+    {
+        return [
+            TextInput::make('name')->required(),
+            TextInput::make('sku')->label('SKU')->required(),
+            Grid::make(2)->schema([
+                TextInput::make('stock')->integer()->required(),
+                TextInput::make('reorder_at')->label('Reorder at')->integer()->required(),
+            ]),
+        ];
+    }
+
+    public function confirmationWidth(): Width|string
+    {
+        return Width::Medium;
+    }
+
+    public function execute(array $payload, Authenticatable $user): string
+    {
+        $form = $payload['form'];
+
+        if (Product::where('sku', $form['sku'])->exists()) {
+            throw ValidationException::withMessages(['sku' => "A product with SKU {$form['sku']} already exists."]);
+        }
+
+        Product::create($form);
+
+        return "Added {$form['name']} ({$form['sku']}).";   // name the final values: the assistant only knows what it proposed
+    }
+}
+```
+
+The workbench's `AddProduct` is this example in full:
+
+<table><tr>
+<td width="50%"><img src="docs/images/edit_card_light.png" alt="An editable confirmation: a new product's name, SKU, stock and reorder level, filled in and ready to correct (light)"></td>
+<td width="50%"><img src="docs/images/edit_card_dark.png" alt="An editable confirmation: a new product's name, SKU, stock and reorder level, filled in and ready to correct (dark)"></td>
+</tr></table>
+
 ## Registering tools and actions
 
 Three composable sources, deduplicated:
@@ -894,6 +997,7 @@ SidekickPlugin::make()->icon(view('icons.my-logo'))
 | Seam | Purpose |
 |---|---|
 | `Contracts\ActionResolver` | Named navigation targets → authorized URLs |
+| `Contracts\HasConfirmationForm` | A Filament form on an action's confirm card, its state handed to `execute()` |
 | `Contracts\ProvidesTurnContext` | Per-turn context on the user's message, keeping instructions cacheable |
 | `Contracts\AlwaysOffered` | Keep a tool out of the catalog and directly in the prompt |
 | `Contracts\LimitProvider` | Where allowances come from — a tenant's plan, a user's settings |

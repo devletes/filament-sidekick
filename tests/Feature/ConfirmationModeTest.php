@@ -3,7 +3,10 @@
 use Devletes\Sidekick\Enums\ConfirmationMode;
 use Devletes\Sidekick\Livewire\ChatPanel;
 use Devletes\Sidekick\Models\PendingAction;
+use Devletes\Sidekick\Support\RunContext;
 use Devletes\Sidekick\Tests\Fixtures\Actions\CreateNote;
+use Devletes\Sidekick\Tests\Fixtures\Actions\NameNote;
+use Devletes\Sidekick\Tests\Fixtures\Actions\PickNotes;
 use Devletes\Sidekick\Tests\Fixtures\Actions\ReviewReport;
 use Devletes\Sidekick\Tests\Fixtures\FakeUser;
 use Devletes\Sidekick\Tools\ActionProposalTool;
@@ -14,7 +17,78 @@ use Livewire\Livewire;
 beforeEach(function () {
     $this->artisan('migrate');
     ReviewReport::$approved = [];
-    config()->set('sidekick.actions', [CreateNote::class, ReviewReport::class]);
+    config()->set('sidekick.actions', [CreateNote::class, ReviewReport::class, PickNotes::class, NameNote::class]);
+    PickNotes::$picked = [];
+    NameNote::$saved = [];
+});
+
+function proposeNote(string $conversationId, FakeUser $user, string $title): PendingAction
+{
+    $context = new RunContext;
+    $context->conversationId = $conversationId;
+    app()->instance(RunContext::class, $context);
+
+    $proposed = json_decode((new ActionProposalTool(new NameNote))->forUser($user)->handle(new Request(['title' => $title])), true);
+
+    return PendingAction::query()->findOrFail($proposed['action_id']);
+}
+
+it('lets the user correct what the card was filled with before confirming', function () {
+    $user = FakeUser::make();
+    $conversationId = (string) Str::uuid7();
+    $this->actingAs($user);
+    $action = proposeNote($conversationId, $user, 'Salmn');
+
+    Livewire::test(ChatPanel::class)
+        ->set('conversationId', $conversationId)
+        ->assertSet('cardFormData.title', 'Salmn')
+        ->set('cardFormData.title', 'Salman')
+        ->call('confirmAction', $action->id);
+
+    expect(NameNote::$saved)->toBe(['Salman'])
+        ->and($action->refresh()->status)->toBe(PendingAction::STATUS_EXECUTED);
+});
+
+it('keeps a form card open with the error under its field when execute() refuses it', function () {
+    $user = FakeUser::make();
+    $conversationId = (string) Str::uuid7();
+    $this->actingAs($user);
+    $action = proposeNote($conversationId, $user, 'Taken');
+
+    $panel = Livewire::test(ChatPanel::class)
+        ->set('conversationId', $conversationId)
+        ->call('confirmAction', $action->id)
+        ->assertHasErrors(['cardFormData.title'])
+        ->assertSet('cardFormData.title', 'Taken')
+        ->assertSee('A note called Taken already exists.');
+
+    expect($action->refresh()->status)->toBe(PendingAction::STATUS_PROPOSED)
+        ->and(NameNote::$saved)->toBe([]);
+
+    // Editing the field clears the refusal before Confirm is pressed again.
+    $panel->set('cardFormData.title', 'Fresh')
+        ->assertHasNoErrors()
+        ->assertDontSee('A note called Taken already exists.')
+        ->call('confirmAction', $action->id)
+        ->assertHasNoErrors();
+
+    expect(NameNote::$saved)->toBe(['Fresh'])
+        ->and($action->refresh()->status)->toBe(PendingAction::STATUS_EXECUTED);
+});
+
+it('shows an error that names no field on the card itself', function () {
+    $user = FakeUser::make();
+    $conversationId = (string) Str::uuid7();
+    $this->actingAs($user);
+    $action = proposeNote($conversationId, $user, 'Closed');
+
+    Livewire::test(ChatPanel::class)
+        ->set('conversationId', $conversationId)
+        ->call('confirmAction', $action->id)
+        ->assertSet('cardError', 'That notebook is closed.')
+        ->assertSee('That notebook is closed.');
+
+    expect($action->refresh()->status)->toBe(PendingAction::STATUS_PROPOSED);
 });
 
 it('defaults to an inline confirmation', function () {
@@ -84,4 +158,54 @@ it('confirms a modal card and closes the modal', function () {
 
     expect(ReviewReport::$approved)->toBe(['Q3 numbers'])
         ->and($action->refresh()->status)->toBe(PendingAction::STATUS_EXECUTED);
+});
+
+function proposeIn(string $conversationId, FakeUser $user, array $titles): array
+{
+    $context = new RunContext;
+    $context->conversationId = $conversationId;
+    app()->instance(RunContext::class, $context);
+
+    return json_decode((new ActionProposalTool(new PickNotes))->forUser($user)->handle(new Request(['titles' => $titles])), true);
+}
+
+it('draws an action\'s confirmation form and hands what was ticked to execute()', function () {
+    $user = FakeUser::make();
+    $conversationId = (string) Str::uuid7();
+    $this->actingAs($user);
+
+    $proposed = proposeIn($conversationId, $user, ['Alpha', 'Beta', 'Gamma']);
+    $action = PendingAction::query()->findOrFail($proposed['action_id']);
+
+    $panel = Livewire::test(ChatPanel::class)
+        ->set('conversationId', $conversationId)
+        ->assertSee('Alpha')
+        ->assertSee('Gamma');
+
+    $rows = $panel->get('cardFormData.rows');
+    expect($rows)->toHaveCount(3);
+
+    $beta = collect($rows)->search(fn (array $row): bool => $row['title'] === 'Beta');
+    $panel->set("cardFormData.rows.{$beta}.selected", false)
+        ->call('confirmAction', $action->id);
+
+    expect(PickNotes::$picked)->toBe(['Alpha', 'Gamma'])
+        ->and($action->refresh()->status)->toBe(PendingAction::STATUS_EXECUTED);
+});
+
+it('keeps what was ticked across a refresh of the panel', function () {
+    $user = FakeUser::make();
+    $conversationId = (string) Str::uuid7();
+    $this->actingAs($user);
+
+    $proposed = proposeIn($conversationId, $user, ['Alpha', 'Beta']);
+
+    $panel = Livewire::test(ChatPanel::class)->set('conversationId', $conversationId);
+    $first = array_key_first($panel->get('cardFormData.rows'));
+
+    $panel->set("cardFormData.rows.{$first}.selected", false)
+        ->call('$refresh')
+        ->assertSet("cardFormData.rows.{$first}.selected", false);
+
+    expect($proposed['action_id'])->not->toBeEmpty();
 });
