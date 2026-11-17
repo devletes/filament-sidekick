@@ -2,6 +2,13 @@
 
 All notable changes to `devletes/filament-sidekick` will be documented in this file.
 
+## [1.1.0] - 2026-11-17
+
+### Added
+
+- `HasConfirmationForm`: an action's confirm card can carry a Filament form, filled by `prepare()` and handed to `execute()` on confirm.
+- A `ValidationException` from `execute()` keeps the card open with the errors under their fields.
+
 ## [1.0.0] - 2026-10-25
 
 First stable release. Requires laravel/ai 1.x; existing conversations are migrated on `php artisan migrate` — see **Changed**.
