@@ -2,6 +2,13 @@
 
 All notable changes to `devletes/filament-sidekick` will be documented in this file.
 
+## [1.1.1] - 2026-11-17
+
+### Fixed
+
+- A turn no longer fails when broadcasting is on and the broadcast server cannot be reached.
+- A confirmed or cancelled card no longer adds a "Done" message to the chat; the card's outcome line already says it. The model still gets the outcome, marked as written by the app, so it no longer takes it for its own reply.
+
 ## [1.1.0] - 2026-11-17
 
 ### Added
