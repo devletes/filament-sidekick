@@ -348,7 +348,11 @@ class RunChatTurn implements ShouldQueue
             return;
         }
 
-        rescue(fn () => broadcast(new RunUpdated($run->user_id, $run->conversation_id, $run->id, $run->status)), report: false);
+        // A statement, not an arrow function: broadcast() sends when its PendingBroadcast is destroyed, so returning
+        // it would send after rescue() had returned, and a failure would escape.
+        rescue(function () use ($run): void {
+            broadcast(new RunUpdated($run->user_id, $run->conversation_id, $run->id, $run->status));
+        }, report: false);
     }
 
     public function failed(?Throwable $e): void

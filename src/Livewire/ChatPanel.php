@@ -469,6 +469,8 @@ class ChatPanel extends Component implements HasActions, HasSchemas
                 ->orderByDesc('id')
                 ->limit((int) config('sidekick.display_limit', 60))
                 ->get()
+                // An answered card's note is the model's; the card's outcome line already tells the user.
+                ->reject(fn (ConversationMessage $message): bool => (bool) ($message->meta['sidekick_ack'] ?? false))
                 ->reverse()
                 ->values()
             : collect();
@@ -647,10 +649,7 @@ class ChatPanel extends Component implements HasActions, HasSchemas
                 'executed_at' => now(),
             ]);
 
-            $this->acknowledge($action, __('sidekick::messages.acknowledge.done', [
-                'summary' => $action->summary,
-                'result' => $action->result,
-            ]));
+            $this->acknowledge($action, 'The user confirmed "'.$action->summary.'". Result: '.$action->result);
             $this->forgetCard();
         } catch (ValidationException $e) {
             // A form card stays open to be fixed; reset by query, as the claim was, since the model still reads "proposed".
@@ -665,7 +664,7 @@ class ChatPanel extends Component implements HasActions, HasSchemas
                 'result' => Str::limit(collect($e->errors())->flatten()->first() ?? $e->getMessage(), 480),
             ]);
 
-            $this->acknowledge($action, __('sidekick::messages.acknowledge.failed', ['reason' => $action->result]));
+            $this->acknowledge($action, 'The user confirmed "'.$action->summary.'", but it did not go through: '.$action->result);
             $this->forgetCard();
         } catch (\Throwable $e) {
             report($e);
@@ -675,7 +674,7 @@ class ChatPanel extends Component implements HasActions, HasSchemas
                 'result' => Str::limit($e instanceof \InvalidArgumentException ? $e->getMessage() : __('sidekick::messages.errors.action_failed'), 480),
             ]);
 
-            $this->acknowledge($action, __('sidekick::messages.acknowledge.failed', ['reason' => $action->result]));
+            $this->acknowledge($action, 'The user confirmed "'.$action->summary.'", but it did not go through: '.$action->result);
             $this->forgetCard();
         }
 
@@ -732,7 +731,7 @@ class ChatPanel extends Component implements HasActions, HasSchemas
             $this->actionModalOpen = false;
             $this->forgetCardForm();
 
-            $this->acknowledge($action, __('sidekick::messages.acknowledge.cancelled', ['summary' => $action->summary]));
+            $this->acknowledge($action, 'The user cancelled "'.$action->summary.'". Nothing was done.');
 
             $this->dispatch('sidekick-jump-to-end');
             $this->dispatch('sidekick-focus-composer');
@@ -814,9 +813,15 @@ class ChatPanel extends Component implements HasActions, HasSchemas
         return $payload;
     }
 
-    /** Hardcoded (not LLM) acknowledgment persisted as a real assistant message so the model sees it in context next turn. */
+    /**
+     * How the answered card ended, kept in the history for the model and never shown: the card's own outcome line says
+     * it to the user. Stored as an assistant message, so it says outright that the app wrote it, or the model takes
+     * it for its own words and apologises for them.
+     */
     protected function acknowledge(PendingAction $action, string $text): void
     {
+        $text = '[App note, not written by you: '.$text.']';
+
         $message = new ConversationMessage([
             'conversation_id' => $action->conversation_id,
             'user_id' => $action->user_id,

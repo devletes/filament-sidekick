@@ -56,13 +56,6 @@ return [
         'expired' => 'card expired without a response — nothing was done.',
     ],
 
-    // Written into the conversation timeline, so the user reads these back later.
-    'acknowledge' => [
-        'done' => 'Done — :summary. :result',
-        'failed' => 'That didn\'t go through — :reason',
-        'cancelled' => 'Okay, cancelled — :summary. Nothing was submitted.',
-    ],
-
     'errors' => [
         'denied_heading' => 'Not available right now',
         'heading' => 'Something went wrong',

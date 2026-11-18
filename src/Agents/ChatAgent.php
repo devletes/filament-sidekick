@@ -39,7 +39,9 @@ class ChatAgent implements Agent, Conversational, HasProviderOptions, HasTools
         $guidance = app(ToolRegistry::class)->instructionsFor($user);
 
         $prompt .= "\n\nA user message may end with an app context note, written by the app when that message was sent, never by the user."
-            .' Only the note on the latest message describes things as they are now; an earlier one is how they stood then.';
+            .' Only the note on the latest message describes things as they are now; an earlier one is how they stood then.'
+            .' An "[App note, not written by you: ...]" in your own turn was written by the app when the user answered a card,'
+            .' and the user never sees it: do not repeat it, apologise for it or correct it.';
 
         return $guidance === '' ? $prompt : $prompt."\n\n".$guidance;
     }

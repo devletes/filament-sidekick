@@ -2,6 +2,7 @@
 
 use Devletes\Sidekick\Enums\ConfirmationMode;
 use Devletes\Sidekick\Livewire\ChatPanel;
+use Devletes\Sidekick\Models\ConversationMessage;
 use Devletes\Sidekick\Models\PendingAction;
 use Devletes\Sidekick\Support\RunContext;
 use Devletes\Sidekick\Tests\Fixtures\Actions\CreateNote;
@@ -47,6 +48,24 @@ it('lets the user correct what the card was filled with before confirming', func
 
     expect(NameNote::$saved)->toBe(['Salman'])
         ->and($action->refresh()->status)->toBe(PendingAction::STATUS_EXECUTED);
+});
+
+it('notes the outcome for the model as the app\'s, and leaves it out of the chat', function () {
+    $user = FakeUser::make();
+    $conversationId = (string) Str::uuid7();
+    $this->actingAs($user);
+    $action = proposeNote($conversationId, $user, 'Salman');
+
+    $panel = Livewire::test(ChatPanel::class)
+        ->set('conversationId', $conversationId)
+        ->call('confirmAction', $action->id);
+
+    $note = ConversationMessage::query()->where('conversation_id', $conversationId)->sole();
+
+    expect($note->role)->toBe('assistant')
+        ->and($note->content)->toBe('[App note, not written by you: The user confirmed "'.$action->summary.'". Result: Created Salman.]');
+
+    $panel->assertDontSee('App note');
 });
 
 it('keeps a form card open with the error under its field when execute() refuses it', function () {
